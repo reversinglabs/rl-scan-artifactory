@@ -1,0 +1,75 @@
+[build-system]
+    requires = ["hatchling"]
+    build-backend = "hatchling.build"
+
+[project]
+    name = "rl-scan-artifactory"
+    dynamic = ['version']
+
+    authors = [
+      { name="ReversingLabs"},
+    ]
+
+    maintainers = [
+      { name="ReversingLabs", email="support@reversinglabs.com" },
+    ]
+
+    requires-python = ">=3.10"
+    dependencies = [
+        "requests",
+        "python-dateutil",
+        "spectra-assure-sdk>=1.0.3",
+    ]
+
+    description = "Python package to process files from Artifactory with Spectra Assure."
+    readme = "README.md"
+    license = "MIT"
+
+    classifiers = [
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+        "Intended Audience :: Developers",
+        "Environment :: Console",
+        "Programming Language :: Python :: 3",
+        "Topic :: Security",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ]
+
+    keywords = [
+        "Python",
+        "Secure Software",
+    ]
+
+[project.scripts]
+    rl-scan-artifactory = 'rl_scan_artifactory.main:main'
+
+[project.urls]
+    "Bug Tracker" = "https://github.com/reversinglabs/rl-scan-artifactory/issues"
+    "Home Page" = "https://github.com/reversinglabs/rl-scan-artifactory"
+    "Repository" = "https://github.com/reversinglabs/rl-scan-artifactory"
+
+[tool.hatch.version]
+    path = "rl_scan_artifactory/version.py"
+
+[tool.hatch.build]
+    only-packages = true
+
+    include = [
+        "rl_scan_artifactory/",
+    ]
+
+    exclude = [
+        "/Old/*",
+        "/lib/*",
+        "/etc/*",
+        "/bin/*",
+        "/testdata/*",
+        "Makefile",
+        ".gitignore",
+        "/.gitignore",
+        ".env",
+        "/tmp/",
+        "/tmp2/",
+        "/vtmp/",
+        "/tools/",
+    ]

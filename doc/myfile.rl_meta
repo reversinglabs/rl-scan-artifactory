@@ -1,0 +1,38 @@
+[rl_meta]
+namespace =
+name =
+version =
+architecture =
+path =
+sha256 =
+
+# generic will need a helper file describing the metadata we need,
+# so it can find the matching file and its:
+#
+# - <name>         [mandatory]
+# - <version>      [mandatory]
+# - <architecture> [optional]
+# - <namespace>    [optional]
+#
+# namespace may be used to create a unique name (like e.g. npm uses)
+# architecture must be used for binary packages (e.g. i386, amd64, arm_v8, ... ,
+#   'none' can be used for code neutral source code but it can also be empty.
+#
+# to create the unique purl from, where components are:
+#
+# - project:  <artifactory repository name>
+# - package:  [ <arch>. ] [ <namespace>. ] <name>
+# - version:  <version>
+#
+# the resulting purl used by the spectra_assure portal is:
+#
+# - purl:    <project>/<package>@<version>
+#
+# none or the resulting strings may contain @ or / or any html conflicting data,
+# if they do containg restricted substrings these will be mapped away to safe values:
+#   e.g. '_'
+#
+# in order to find and verify the file described by this meta info we need the mandatory
+#
+# - <path>      [mandatory]
+# - <sha256>    [mandatory]

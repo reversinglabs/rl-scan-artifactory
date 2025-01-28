@@ -42,7 +42,6 @@ After it's installed, the integration can be started manually or scheduled to ru
 
 When the integration is started for the first time, scanning may take many hours or even days depending on the size and the number of artifacts in the specified Artifactory repositories.
 
-
 The integration downloads the artifacts to a temporary directory and scans them one by one using one of the selected Spectra Assure products.
 
 The following products are supported:

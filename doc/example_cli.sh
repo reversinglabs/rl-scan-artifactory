@@ -28,7 +28,7 @@ export PROXY_PASS="" # if a username is specified, you will most likely need to 
 
 # If using Spectra Assure CLI, rl-secure executable must exist and a previously initialized package store is required
 export RL_STORE_PATH="$HOME/tmp/rl-secure/.rl-secure"
-export RL_SECURE_PATH="$HOME/tmp/rl-secure/rl-secure"
+export RL_SECURE_PATH="$HOME/tmp/rl-secure"
 
 # Currently, only 'local' and 'remote' repositories are supported.
 # Do not specify the cache repo name, but specify the remote repo name.

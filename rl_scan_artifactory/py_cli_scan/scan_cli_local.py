@@ -28,11 +28,13 @@ class ScanCliLocal(
         where: str,
         store: str | None = None,
         temp_dir_path: str | None = None,  # you handle temp_dir yourself, must be empty
+        reports_list: List[str] | None = None,
     ) -> None:
         super().__init__(
             purl=purl,
             store=store,
             temp_dir_path=temp_dir_path,
+            reports_list=reports_list,
         )
 
         self.where: str = where
@@ -174,10 +176,11 @@ class ScanCliLocal(
         self,
         with_pack_safe: bool = False,
     ) -> int:
+        reports = ",".join(self.reports_list)
         command = [
             "report",
             "--no-tracking",
-            "--format=all",
+            f"--format={reports}",
             f"--bundle={self.bundle_name}",
             f"--output-path={self.temp_dir_path}",
         ]

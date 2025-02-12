@@ -5,6 +5,7 @@ import time
 from typing import (
     Any,
     Dict,
+    Tuple,
 )
 
 from .artifactory_file_processor_common import ArtifactoryFileProcessorCommon
@@ -63,7 +64,7 @@ class ArtifactoryFileProcessorGeneric(
         self,
         *,
         cli_args: Dict[str, Any],
-        spectra_assure_api: SpectraAssureApi,
+        spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo: ArtifactoryRepoInfo,
         artifact_item: Dict[str, Any],
@@ -95,7 +96,7 @@ class ArtifactoryFileProcessorGeneric(
     def _make_meta_dict(
         self,
         config: Any,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, str | None]:
         meta: Dict[str, str | None] = {}
 
         for n in self.rl_meta_fields:
@@ -108,6 +109,7 @@ class ArtifactoryFileProcessorGeneric(
             k = f"{self.what}.{self.derived}.{k}"
             v = meta[n]
             self.file.properties[k] = v
+
         logger.debug("%s", meta)
         return meta
 
@@ -150,32 +152,34 @@ class ArtifactoryFileProcessorGeneric(
 
     def _load_meta_info(
         self,
-    ) -> bool:
-        is_uploaded = False
+    ) -> Tuple[bool, Any]:
+        """Download the meta file and extract ist info"""
+        is_downloaded = False
+
         aa = self.uri.split("/")
         target_name = aa[-1]
         assert target_name is not None
-        download_path, verify_ok = self._do_one_artifactory_download(  # the manifest.json only
+        download_path, verify_ok = self._do_one_artifactory_download(
             target_name=target_name,
         )
 
         if download_path is None:
             logger.error("download failed file for: %s", download_path)
-            return is_uploaded
+            return is_downloaded, None
 
         config = configparser.ConfigParser()
         config.read(download_path)
 
         if self.rl_meta not in config:
             logger.error("missing %s in meta file", self.rl_meta, download_path)
-            return is_uploaded
+            return is_downloaded, None
 
         meta = self._make_meta_dict(config=config)
         self._verify_mandatory(meta=meta)
         self._set_purl_data(meta=meta)
         self._remove_files([download_path])
 
-        return True
+        return True, meta
 
     def _update_artifactory_item_with_scan_status(
         self,
@@ -185,7 +189,7 @@ class ArtifactoryFileProcessorGeneric(
     ) -> None:
         logger.debug("%s", report)
         if report is not None and self.what_backend == "portal":
-            base = self.make_report_base()
+            base = self._portal_make_report_base()
             report = f"{base}/{report}"
         logger.debug("%s", report)
 
@@ -430,7 +434,7 @@ class ArtifactoryFileProcessorGeneric(
         self.steps["artifactory_properties_exists"] = False
         logger.debug("inspect %s", self.uri)
 
-        meta_ok = self._load_meta_info()  # if there is no meta we ignore this item
+        meta_ok, _ = self._load_meta_info()  # if there is no meta we ignore this item
         if meta_ok is False:
             self.processing_info.completed = True
             self.processing_info.status = PROCESS_FILE_SKIP
@@ -467,31 +471,9 @@ class ArtifactoryFileProcessorGeneric(
         logger.debug("candidate2 %s", self.uri)
         self.steps["artifactory_properties_exists"] = False
 
-        # -----------------------------
-        # get the purl components
-        project, package, version = self.get_purl_from_name_mangler(
-            p_type=self.p_type,
-        )
-        project = "project"  # should be repo name
-        package = "package"  # could be file name
-        version = "v0"  # no version for generic
-
         self._populate_purl_info(project, package, version)
         self.steps["have_package_url"] = True
         purl = self.purl_info.make_purl()
-
-        sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
-        if sync_requested is True:
-            msg = f"sync not supported for generic with cli: {self.file}"
-            logger.error(msg)
-
-            self.processing_info.completed = True
-            self.processing_info.reason = msg
-            self.processing_info.status = PROCESS_FILE_SKIP
-            self.processing_info.scan_state = None
-            self.processing_info.purl = purl
-            self.processing_info.report = None
-            return False
 
         # for now just keep the downloaded file even if we dont actually need it for sync
         download_path, verify_ok = self._do_one_artifactory_download()
@@ -521,7 +503,8 @@ class ArtifactoryFileProcessorGeneric(
         logger.debug("candidate1 %s", self.uri)
 
         assert self.fp is not None
-        skip_candidate = self.fp.skip_non_candidate_file()  # it there is no meta we will have to scan all files
+
+        skip_candidate = self.fp.skip_non_candidate_file()
         if skip_candidate:
             self.processing_info.completed = True
             self.processing_info.status = PROCESS_FILE_SKIP
@@ -567,10 +550,24 @@ class ArtifactoryFileProcessorGeneric(
         self.steps["artifactory_properties_exists"] = False
         logger.debug("inspect %s", self.uri)
 
+        # for generic
+        meta_info = {
+            "project": self.file.repo.name,
+            "package": self._escape_string_for_spectra_assure_purl_component(self.filename),
+            "version": "v0",
+        }
+        logger.debug(self.repo_db)
+        if self.uri in self.repo_db:
+            logger.debug("%s", self.repo_db[self.uri])
+            meta_info = self.repo_db[self.uri]
+        logger.debug("%s", meta_info)
+
         # currently no meta file for cli
-        self.purl_info.project = "project"  # we should use the repo name as project # TODO
-        self.purl_info.package = "package"  # we could use the name of the file as package # TODO
-        self.purl_info.version = "v0"  # we have no version in generic without a meta file
+        self.purl_info.project = meta_info["project"]
+        self.purl_info.package = meta_info["package"]
+        self.purl_info.version = meta_info["version"]
+        # print(self.purl_info)
+
         self.steps["have_package_url"] = True
 
         assert self.purl_info.project is not None
@@ -588,6 +585,26 @@ class ArtifactoryFileProcessorGeneric(
         )
 
     # PUBLIC
+    def extract_generic_meta_info(self) -> Dict[str, Any]:
+        """
+        Download the rl_meta file
+        extract its properties,
+        return a dict with the meta info and a valid purl.
+        """
+        meta_dict: Dict[str, Any] = {}
+        has_meta, meta = self._load_meta_info()
+        if has_meta is False:
+            logger.debug("%s", meta)
+            return meta_dict
+
+        meta_dict["project"] = self.purl_info.project
+        meta_dict["package"] = self.purl_info.package
+        meta_dict["version"] = self.purl_info.version
+        meta_dict["meta"] = meta
+
+        logger.debug("%s", meta_dict)
+
+        return meta_dict
 
     def process(  # noqa: C901
         self,

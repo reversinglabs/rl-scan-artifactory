@@ -1,6 +1,7 @@
 # python3 ts=4space
 import logging
 import os
+import sys
 import time
 from dataclasses import (
     dataclass,
@@ -168,12 +169,23 @@ class ArtifactoryFileProcessorCommon(
         self,
         *,
         cli_args: Dict[str, Any],
-        spectra_assure_api: SpectraAssureApi,
+        spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo: ArtifactoryRepoInfo,
         artifact_item: Dict[str, Any],
-        repo_db: Dict[str, Any],  # pass infor between file processing; docker list.manifest.json currently
+        repo_db: Dict[str, Any],  # pass info between file processing; docker list.manifest.json currently
     ) -> None:
+        """
+        ArtifactoryFileProcessorCommon
+
+        args:
+        - cli_args:
+        - spectra_assure_api:
+        - artifactory_api:
+        - repo:
+        - artifact_item:
+        - repo_db:
+        """
         # -----------------------------
         super().__init__(
             cli_args=cli_args,
@@ -300,6 +312,7 @@ class ArtifactoryFileProcessorCommon(
         file_path: str,
     ) -> bool:
         assert self.what_backend == "portal"
+        assert self.spectra_assure_api is not None
         purl = self.purl_info.make_purl()
 
         is_uploaded, optional_msg = self.spectra_assure_api.upload_artifact_to_portal(
@@ -525,6 +538,8 @@ class ArtifactoryFileProcessorCommon(
         project, package, version = self._purl_split(purl=purl)
 
         assert self.what_backend == "portal"
+        assert self.spectra_assure_api is not None
+
         rr = self.spectra_assure_api.api_client.status(
             project=project,
             package=package,
@@ -547,11 +562,12 @@ class ArtifactoryFileProcessorCommon(
         - False is no sync is needed
         - True if sync has started
         """
+        assert self.what_backend == "portal"
+        assert self.spectra_assure_api is not None
 
         purl = self.purl_info.make_purl()
         project, package, version = self._purl_split(purl=purl)
 
-        assert self.what_backend == "portal"
         rr = self.spectra_assure_api.api_client.sync(
             project=project,
             package=package,
@@ -563,11 +579,11 @@ class ArtifactoryFileProcessorCommon(
             logger.warning("sync issue (%s) on purl: %s", rr.status_code, self.purl_info.make_purl())
             return None
 
-        assert int(rr.status_code) in [200, 202]
-        # 200 means no sync needed, 202 means sync started
+        assert int(rr.status_code) in [200, 202]  # 200 means no sync needed, 202 means sync started
         sync_started = bool(int(rr.status_code) == 202)
         if sync_started:
             time.sleep(2)
+
         return sync_started
 
     def _update_artifactory_item_with_scan_status(
@@ -579,7 +595,7 @@ class ArtifactoryFileProcessorCommon(
         logger.debug("XXX %s", report)
 
         if report is not None and "http" not in report.lower():
-            base = self.make_report_base()
+            base = self._portal_make_report_base()
             report = f"{base}/{report}"
 
         logger.debug("YYY %s", report)
@@ -719,6 +735,7 @@ class ArtifactoryFileProcessorCommon(
         digest: str | None,
     ) -> Tuple[bool, str | None, str | None]:
         assert self.what_backend == "portal"
+        assert self.spectra_assure_api is not None
 
         exists = self.spectra_assure_api.exist_version(
             project=project,
@@ -733,7 +750,7 @@ class ArtifactoryFileProcessorCommon(
 
         logger.debug("%s", report)
         if report:
-            base = self.make_report_base()
+            base = self._portal_make_report_base()
             report = f"{base}/{report}"
         logger.debug("%s", report)
 
@@ -853,9 +870,11 @@ class ArtifactoryFileProcessorCommon(
 
         return False
 
-    def make_report_base(
+    def _portal_make_report_base(
         self,
     ) -> str:
+        assert self.spectra_assure_api is not None
+
         """create the correct base for normal and special 'server' strings."""
         server = self.spectra_assure_api.server
         if server in ["trial", "playground"]:
@@ -967,12 +986,18 @@ class ArtifactoryFileProcessorCommon(
 
         logger.debug("post %s %s", repo_name, report_uri)
 
-        r_code, r_text, report_url = self.artifactory_api.upload_file_to_artifactory(
-            file_path=report_bundle_path,
-            repo_name=repo_name,
-            uri_path=report_uri,
-        )
-        logger.debug("%s %s %s", r_code, r_text, report_url)
+        try:
+            r_code, r_text, report_url = self.artifactory_api.upload_file_to_artifactory(
+                file_path=report_bundle_path,
+                repo_name=repo_name,
+                uri_path=report_uri,
+            )
+            logger.debug("%s %s %s", r_code, r_text, report_url)
+        except Exception as e:
+            logger.exception(
+                "Fatal: %s:%s; cannot upload report_bundle: %s; %s", repo_name, report_uri, report_bundle_path, e
+            )
+            sys.exit(101)
 
         if self.repo.repo_type != "remote":
             logger.debug("%s %s %s", self.repo.repo_type, self.repo, report_uri)
@@ -1014,6 +1039,11 @@ class ArtifactoryFileProcessorCommon(
     ) -> str:
         assert self.processing_info.status is not None
         return self.processing_info.status
+
+    def extract_generic_meta_info(
+        self,
+    ) -> Dict[str, Any]:
+        raise NotImplementedError
 
     def process(
         self,

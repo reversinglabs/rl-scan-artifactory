@@ -18,7 +18,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 class ScanCliDocker(
     ScanCliBase,
 ):
-    report_format: List[str] = ["all"]
     docker_image_name: str = "reversinglabs/rl-scanner:latest"
 
     RLSECURE_ENCODED_LICENSE: str
@@ -34,6 +33,7 @@ class ScanCliDocker(
         site_key: str,
         store: str | None = None,
         temp_dir_path: str | None = None,  # you handle temp_dir yourself, must be empy
+        reports_list: List[str] | None = None,
     ) -> None:
         # later: add rl-store external to docker
 
@@ -41,6 +41,7 @@ class ScanCliDocker(
             purl=purl,
             temp_dir_path=temp_dir_path,
             store=store,
+            reports_list=reports_list,
         )
 
         self.RLSECURE_ENCODED_LICENSE: str = encoded_license
@@ -60,12 +61,6 @@ class ScanCliDocker(
         docker_image_name: str,
     ) -> None:
         self.docker_image_name: str = docker_image_name
-
-    def set_report_format(
-        self,
-        report_format: List[str],
-    ) -> None:
-        self.report_format = report_format
 
     def _do_docker_rl_scan(
         self,
@@ -93,12 +88,13 @@ class ScanCliDocker(
             s = f"--volume={self.store}:/rl-store"
             command1.append(s)
 
+        reports = ",".join(self.reports_list)
         command2 = [
             f"{self.docker_image_name}",
             "rl-scan",
             f"--purl={self.purl}",
             f"--package-path=/packages/{file_name}",
-            f"--report-format={','.join(self.report_format)}",
+            f"--report-format={reports}",
             "--report-path=/report",
             "--replace",
         ]
@@ -144,11 +140,12 @@ class ScanCliDocker(
                 f"--user={self.user_id}:{self.group_id}",
             )
 
+        reports = ",".join(self.reports_list)
         command2 = [
             f"{self.docker_image_name}",
             "rl-sync",
             f"--purl={self.purl}",
-            f"--report-format={','.join(self.report_format)}",
+            f"--report-format={reports}",
             "--report-path=/report",
         ]
 

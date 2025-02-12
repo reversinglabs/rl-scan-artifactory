@@ -13,12 +13,15 @@ To activate the plugin, create the `rlBlock.properties` file in the plugin direc
 /opt/jfrog/artifactory/var/etc/artifactory/plugins/rlBlock.properties
 ```
 
-In the `rlBlock.properties` file, set the `block_downloads_failed` field to `'true'`. 
+### Block
+In the `rlBlock.properties` file, set the `block_downloads_failed` field to `'true'`.
 This is required for the plugin to function.
 
 ```
 block_downloads_failed = 'true'
 ```
+
+### Allow
 
 The `rlBlock.properties` file also allows optional allowlisting for repositories and IP addresses.
 
@@ -33,8 +36,23 @@ To ensure that download requests from specific IP addresses will never be blocke
 ```
 never_block_ip_list = ['1.2.3.4' , '5.6.7.8']
 ```
-    
+
 This option is particularly suited for allowing all downloads from the host that runs the `rl-scan-artifactory` integration.
+
+### Feedback
+
+You can also add information to the 403 reply from rlBlock how to contact an administrator by using:
+
+```
+admin_name = 'Your Friendly Administrator'
+admin_email = 'your.friendly@administrator.noreply'
+```
+
+### Report
+
+The 403 reply from rlBlock will show the link to the report so the user can find out more about the reasons whey the block was  enforced.
+
+### Activate
 
 Restart Artifactory to activate the plugin and apply configuration changes.
 

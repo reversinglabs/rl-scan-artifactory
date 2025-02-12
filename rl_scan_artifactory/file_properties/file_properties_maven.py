@@ -115,4 +115,4 @@ class FilePropertiesMaven(
             logger.debug("SKIP: %s not a '%s' file: %s", self.p_type, k, self.uri)
             self.file.simple = {}
             return True
-        return self._generic_filter_on_item_properties()
+        return self._common_filter_on_item_properties()

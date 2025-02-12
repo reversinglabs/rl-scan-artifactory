@@ -98,9 +98,19 @@ class FilePropertiesGeneric(
     def skip_non_candidate_file(
         self,
     ) -> bool:
+        """
+        Decide if we process or skip:
+
+        in portal mode
+            we only look at rl_meta files and process via the meta file
+            we skip therfore all non meta files
+
+        in cli mode we process
+        """
         if self.cli_args.get("portal"):
             if not self.uri.endswith(self.k):
                 logger.debug("SKIP: %s not a '%s' file: %s", self.p_type, self.k, self.uri)
                 self.file.simple = {}
                 return True
-        return self._generic_filter_on_item_properties()
+
+        return self._common_filter_on_item_properties()  # returns False , we do not skip

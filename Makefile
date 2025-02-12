@@ -4,16 +4,11 @@
 SHELL := /bin/bash
 export SHELL
 
-# ==========================================
-
-# VENV AND EXPORTS
 VENV := ./vtmp/
 export VENV
 
-# note: pylama breaks on 3.12 if you dont install setuptools
-# supported on 3.10-3.14
+# tested on 3.10-3.14
 MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | awk '{print $0; exit}' ) )
-# MIN_PYTHON_VERSION := python3.14
 export MIN_PYTHON_VERSION
 
 PIP_INSTALL := pip3 -q \
@@ -23,7 +18,6 @@ PIP_INSTALL := pip3 -q \
 
 # ==========================================
 # Code formatting and checks
-
 PY_FILES := \
 		*.py \
 		rl_scan_artifactory/*.py \
@@ -47,15 +41,12 @@ MYPY_INSTALL := \
 	types-python-dateutil \
 	spectra-assure-sdk
 
-# ----------------------------------------------
 COMMON_VENV := rm -rf $(VENV); \
 	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
 	source ./$(VENV)/bin/activate;
 
-
 .PHONEY: clean prep
 
-# ==========================================
 # ==========================================
 
 all: clean prep test
@@ -104,10 +95,20 @@ mypy:
 
 # verify we use vertical defs def xxx(self,) -> ...:
 # that get formatted vertical by black
-
 verify_vertical_def:
 	grep '(self)' $(PY_FILES) || exit 0
 	grep '(self,' $(PY_FILES) || exit 0
 
+full_test: clean_both all testpypi
+
 test:
 	make -f Makefile.test test
+
+build:
+	make -f Makefile.testpypi build
+
+testpypi:
+	make -f Makefile.testpypi
+
+clean_both:
+	make -f Makefile.clean_both clean_both

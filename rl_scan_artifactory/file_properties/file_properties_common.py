@@ -85,7 +85,7 @@ class FilePropertiesCommon:
 
         return sd.make_simple_data()
 
-    def _generic_filter_on_item_properties(
+    def _common_filter_on_item_properties(
         self,
     ) -> bool:
         simple_data = self.make_simple_data_interface()
@@ -107,6 +107,8 @@ class FilePropertiesCommon:
             )
 
         self.file.simple = simple_data
+        logger.debug("%s", simple_data)
+        logger.debug("skip: %s", skip)
         return skip
 
     def _get_common_properties(

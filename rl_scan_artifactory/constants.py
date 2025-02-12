@@ -178,7 +178,20 @@ VERIFY_BUF_SIZE: int = 65536
 DEFAULT_DIGEST_TYPE: str = "sha256"
 
 # if 1 all docker items under to the dirname path of the manifest.json get all the properties set.
-DOCKER_RECURSIVE = 0
+DOCKER_RECURSIVE = 1
 
 CLI_REPORTS_FILE = "reports.zip"
 CLI_REPORTS_FILE_TAIL = f"-{CLI_REPORTS_FILE}"
+
+CliReportFormatList: List[str] = [
+    "cyclonedx",
+    "sarif",
+    "spdx",
+    "rl-html",
+    "rl-json",
+    "rl-checks",
+    "rl-cve",
+    "rl-uri",
+    "all",
+]
+# what about rl-safe pack

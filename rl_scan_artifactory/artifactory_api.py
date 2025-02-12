@@ -7,6 +7,7 @@ from typing import (
     Dict,
     Any,
     Tuple,
+    List,
 )
 
 import requests
@@ -454,6 +455,29 @@ class ArtifactoryApi(ArtifactoryApiBase):
                 continue
 
         return qp_out
+
+    def search_prop_fail(
+        self,
+        repo_list: List[str] | None = None,
+    ) -> Any:
+        # GET https://alt-artifactory-dev/artifactory/api/search/
+        #    prop?RL.scan-status=fail[&repos=my-release-candidates,docker-local]
+        url = f"{self.base_url}/api/search/prop?RL.scan-status=fail"
+
+        if repo_list is None:
+            repo_list = []
+
+        repos = ",".join(repo_list)
+        if len(repos) > 0:
+            url = url + "&repos=" + repos
+
+        logger.debug("url: %s", url)
+        r = self._request_get(url)
+        if r.status_code < 200 or r.status_code >= 300:
+            return {}
+        logger.debug("result: %s", r.json())
+
+        return r.json()
 
     def list_repo_items(
         self,

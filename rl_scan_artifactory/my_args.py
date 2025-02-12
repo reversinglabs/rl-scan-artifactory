@@ -12,6 +12,7 @@ from typing import (
 from .constants import (
     MY_ENV_NAMES,
     DEFAULT_TEMPDIR,
+    CliReportFormatList,
 )
 from .exceptions import SpectraAssureInvalidAction
 from .version import VERSION
@@ -20,9 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 class MyArgs:  # pylint: disable=R0903; Too few public methods
-    def __init__(
-        self,
-    ) -> None:
+    def __init__(self, repo_list_may_be_empty: bool = False, no_portal_or_cli: bool = False) -> None:
+        self.repo_list_may_be_empty = repo_list_may_be_empty
         self.prog = self._get_prog_name()
         self.parser = argparse.ArgumentParser(
             prog=self.prog,
@@ -40,21 +40,46 @@ class MyArgs:  # pylint: disable=R0903; Too few public methods
             if self.cli_args.get("sync"):
                 raise Exception("cli-docker currently cannot support sync")
 
-        self._exor_portal_and_cli()
-        self._validate_cli_or_docker()
+        if no_portal_or_cli is False:
+            self._exor_portal_and_cli()
+            self._validate_cli_or_docker()
 
         if self.cli_args.get("sync", False) is True:
             # if sync is requested any existing scan must be done again so ignore artifactory properties
             self.cli_args["ignore_artifactory_properties"] = True
 
+        logger.debug("%s", self.cli_args.get("cli_report_types"))
+        self.cli_args["reports_requested"] = self._cleanup_reports()
+        logger.debug("%s", self.cli_args.get("reports_requested"))
+
         logger.debug("%s", self.cli_args)
 
-    @staticmethod
-    def mandatory_repo(
+    def _cleanup_reports(self) -> List[str]:
+        k = "cli_report_types"
+
+        report_list = self.cli_args.get(k)
+        if not report_list:
+            return []
+
+        report_list = self.cli_args.get(k, "").split(",")
+        if "all" in report_list:
+            return ["all"]
+
+        out_list: List[str] = []
+        for report_name in report_list:
+            if report_name in CliReportFormatList:
+                if report_name not in out_list:
+                    out_list.append(report_name)
+        return out_list
+
+    def mandatory_repo(  # noqa: C901
+        self,
         args: Dict[str, Any],
     ) -> List[str]:
         out_list: List[str] = []
         in_list: List[str] = args.get("repo", [])
+        if in_list is None:
+            in_list = []
 
         def one_list(a_list: List[str]) -> None:
             for item in a_list:
@@ -72,11 +97,12 @@ class MyArgs:  # pylint: disable=R0903; Too few public methods
             else:
                 one_list([k])
 
-        if len(out_list) == 0:
-            msg = "The list of repository names cannot be empty: use the --repo/-r option"
-            logger.error(msg)
-            print(msg, file=sys.stderr)
-            sys.exit(2)
+        if self.repo_list_may_be_empty is False:
+            if len(out_list) == 0:
+                msg = "The list of repository names cannot be empty: use the --repo/-r option"
+                logger.error(msg)
+                print(msg, file=sys.stderr)
+                sys.exit(2)
 
         return out_list
 
@@ -176,6 +202,14 @@ class MyArgs:  # pylint: disable=R0903; Too few public methods
             help="upload reports for remote repositories to a local repo",
         )
 
+        z = list(filter(lambda x: x != "all", CliReportFormatList))
+        self.parser.add_argument(
+            "--cli-report-types",
+            type=str,
+            default="all",
+            help=f"specify what reports you need, a comma seperated list of {z}; default 'all'",
+        )
+
         self.parser.add_argument(
             "--cli-docker",
             action="store_true",
@@ -267,6 +301,6 @@ class MyArgs:  # pylint: disable=R0903; Too few public methods
             print(f"version: {VERSION}")
             sys.exit(0)
 
-        repo_list = self.mandatory_repo(args=args)
+        repo_list = self.mandatory_repo(args)
         args["repo"] = repo_list
         return args

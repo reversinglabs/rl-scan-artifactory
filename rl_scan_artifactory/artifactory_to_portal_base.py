@@ -17,7 +17,7 @@ class ArtifactoryToPortalBase:
         self,
         *,
         cli_args: Dict[str, Any],
-        spectra_assure_api: SpectraAssureApi,
+        spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
     ) -> None:
         self.cli_args = cli_args

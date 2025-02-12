@@ -24,7 +24,7 @@ class ArtifactoryRepoProcessor(
         self,
         *,
         cli_args: Dict[str, Any],
-        spectra_assure_api: SpectraAssureApi,
+        spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo_name: str,
     ) -> None:

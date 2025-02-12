@@ -105,6 +105,7 @@ class SimpleDataCommon:
                 if k.endswith(tail):
                     self.simple_data[name] = v
 
+        logger.debug("%s", self.simple_data)
         return self.simple_data
 
     def make_simple_data(

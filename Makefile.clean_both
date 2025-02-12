@@ -1,0 +1,78 @@
+# Makefile tab=tab,ts=4
+SHELL := /bin/bash
+export SHELL
+
+MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | awk '{print $0; exit}' ) )
+export MIN_PYTHON_VERSION
+
+PIP_INSTALL := pip3 \
+	--require-virtualenv \
+	--disable-pip-version-check \
+	--no-color install --no-cache-dir
+
+VENV := ./vtmp/
+export VENV
+
+ENV_FILE_PORTAL := ../.env_portal
+
+LOG_LEVEL := DEBUG
+# LOG_LEVEL := INFO
+# LOG_LEVEL := WARNING
+export LOG_LEVEL
+
+# ----------------------------------------------
+REPOS_DEBIAN := ubuntu
+REPOS_DOCKER := docker docker-local
+
+REPOS_GENERIC := my-generic-local,my-release-candidates
+REPOS_GENERIC := my-generic-local
+
+REPOS_MVN := maven2-dev,maven2-local-dev
+REPOS_NPM := nmpjs.org,npm-local
+REPOS_NUGET := noget-dev-remote-mboot
+REPOS_PYPI := pypi
+REPOS_RPM := mboot-dev-fedora_epel-remote,mboot-dev-rockylinux-remote
+REPOS_RUBY := rubygems-1
+
+REPO_LIST_DEFAULT := \
+	--repo $(REPOS_MVN) \
+	--repo $(REPOS_NPM) \
+	--repo $(REPOS_NUGET) \
+	--repo $(REPOS_PYPI) \
+	--repo $(REPOS_RPM) \
+	--repo $(REPOS_RUBY) \
+	--repo $(REPOS_DEBIAN)
+
+REPO_LIST_FULL := \
+	--repo  $(REPOS_DOCKER) \
+	--repo $(REPOS_GENERIC) \
+	$(REPO_LIST_DEFAULT)
+
+REPO_LIST := $(REPO_LIST_FULL)
+
+# ----------------------------------------------
+COMMON_VENV := rm -rf $(VENV); \
+	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
+	source ./$(VENV)/bin/activate;
+
+COMMON_RUN := $(COMMON_VENV) \
+	$(PIP_INSTALL) -r requirements.txt ; \
+	$(MIN_PYTHON_VERSION)
+
+# ----------------------------------------------
+clean_both: cleanup_portal_projects cleanup_artifactory_properties
+
+cleanup_portal_projects:
+	source $(ENV_FILE_PORTAL); \
+	export WITH_TEST_CLEANUP_ALL_PROJECTS=1; \
+	$(COMMON_RUN) ./$@.py \
+		$(REPO_LIST) \
+		-v -P --ignore-cert-errors | tee $@.1; \
+		exit 0
+
+cleanup_artifactory_properties:
+	source $(ENV_FILE_PORTAL); \
+	$(COMMON_RUN) ./$@.py \
+		$(REPO_LIST) \
+		-v -P --ignore-cert-errors | tee $@.1; \
+		exit 0

@@ -24,7 +24,7 @@ class ArtifactoryFileProcessorDefault(
         self,
         *,
         cli_args: Dict[str, Any],
-        spectra_assure_api: SpectraAssureApi,
+        spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo: ArtifactoryRepoInfo,
         artifact_item: Dict[str, Any],

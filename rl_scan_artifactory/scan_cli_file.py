@@ -57,6 +57,7 @@ class ScanCli:
             site_key=site_key,
             store=store,
             temp_dir_path=self.temp_dir_name,
+            reports_list=self.cli_args.get("reports_requested", []),
         )
 
         if sync_requested:
@@ -94,6 +95,7 @@ class ScanCli:
             where=rlsecure,
             store=store,
             temp_dir_path=self.temp_dir_name,
+            reports_list=self.cli_args.get("reports_requested", []),
         )
 
         if sync_requested:
@@ -122,6 +124,8 @@ class ScanCli:
         sync_requested: bool = False,
     ) -> Any:
         store = self.cli_args.get("cli_rlstore_path")
+
+        logger.debug("%s", self.cli_args.get("cli_report_types"))
 
         if self.cli_args.get("cli_docker") is True:
             return self._cli_docker_scan_or_sync(

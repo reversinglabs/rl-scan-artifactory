@@ -2,13 +2,6 @@
 SHELL := /bin/bash
 export SHELL
 
-# ==========================================
-# ==========================================
-# supported on 3.10-3.14
-
-# VENV AND EXPORTS
-# note: pylama breaks on 3.12 if you dont install setuptools
-
 MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | awk '{print $0; exit}' ) )
 export MIN_PYTHON_VERSION
 
@@ -21,19 +14,14 @@ VENV := ./vtmp/
 export VENV
 
 PROGRAM := rl-scan-artifactory-dev
-PACKAGE := rl-scan-artifactory
-PROGRAM_AFTER_INSTALL := rl-scan-artifactory
 
-ENV_FILE := ../.env
-
-# ==========================================
-# ==========================================
-# PROGRAM RUN SETUP
+ENV_FILE_PORTAL := ../.env_portal
+ENV_FILE_CLI := ../.env_cli
 
 DOWNLOAD_PATH := ./tmp2
 export DOWNLOAD_PATH
 
-WITH_TEST_LIMIT_REPO_TO := 10
+WITH_TEST_LIMIT_REPO_TO := 5
 export WITH_TEST_LIMIT_REPO_TO
 
 # ----------------------------------------------
@@ -44,7 +32,9 @@ export LOG_LEVEL
 
 # ----------------------------------------------
 REPOS_DEBIAN := ubuntu
-REPOS_DOCKER := docker
+REPOS_DOCKER := docker docker-local
+
+REPOS_GENERIC := my-generic-local,my-release-candidates
 REPOS_GENERIC := my-generic-local
 
 REPOS_MVN := maven2-dev,maven2-local-dev
@@ -70,32 +60,34 @@ REPO_LIST_FULL := \
 
 REPO_LIST := $(REPO_LIST_FULL)
 
-REPO_LIST := --repo $(REPOS_GENERIC)
-
 # ----------------------------------------------
-# SYNC := --sync # --ignore-artifactory-properties
-SYNC := --ignore-artifactory-properties
+SYNC := --sync --ignore-artifactory-properties
 
-OPTIONS_TEST_COMMON := --verbose --pack-safe \
-	--ignore-cert-errors --download=$(DOWNLOAD_PATH) \
+OPTIONS_TEST_COMMON := \
+	--ignore-artifactory-properties \
+	--verbose \
+	--pack-safe \
+	--ignore-cert-errors \
+	--download=$(DOWNLOAD_PATH) \
 	$(REPO_LIST)
 
-OPTIONS_TEST_PORTAL := $(OPTIONS_TEST_COMMON) --portal -I
-
 # rl-store may not exist on test machines
-CLI_OPTIONS := --cli \
+CLI_COMMON := \
 	--cli-rlstore-path=$$HOME/tmp/rl-secure \
-	--cli-rlsecure-path=$$HOME/tmp/rl-secure \
-	--cli-reports-repo="Spectra-Assure-Reports"
+	--cli-reports-repo="Spectra-Assure-Reports" \
+	--cli-report-types=rl-json,rl-cve,rl-uri
 
-# cli-docker currenty as no sync possibility (skip 2 weeks, fail on --sync)
-CLI_DOCKER_OPTIONS := --cli-docker \
-	--cli-rlstore-path=$$HOME/tmp/rl-secure/ \
-	--cli-reports-repo="Spectra-Assure-Reports"
+CLI_OPTIONS := --cli $(CLI_COMMON) \
+	--cli-rlsecure-path=$$HOME/tmp/rl-secure \
+
+# cli-docker currenty as no sync possibility (fail on --sync)
+CLI_DOCKER_OPTIONS := --cli-docker 	$(CLI_COMMON) \
 
 OPTIONS_TEST_CLI := $(OPTIONS_TEST_COMMON) $(CLI_OPTIONS)
 
 OPTIONS_TEST_CLI_DOCKER := $(OPTIONS_TEST_COMMON) $(CLI_DOCKER_OPTIONS)
+
+OPTIONS_TEST_PORTAL := $(OPTIONS_TEST_COMMON) --portal
 
 # ----------------------------------------------
 COMMON_VENV := rm -rf $(VENV); \
@@ -104,132 +96,25 @@ COMMON_VENV := rm -rf $(VENV); \
 
 COMMON_RUN := $(COMMON_VENV) \
 	$(PIP_INSTALL) -r requirements.txt ; \
-	source $(ENV_FILE); \
 	$(MIN_PYTHON_VERSION)
 
-## ==========================================
-test: prep_test test_portal test_cli
+# ----------------------------------------------
+test: prep_test test_cli test_cli_docker test_portal
 
 prep_test:
 	mkdir -p $(DOWNLOAD_PATH)
 
-test_portal: $(PROGRAM)_portal
-
-test_cli: $(PROGRAM)_cli
-
-test_cli_docker: $(PROGRAM)_cli_docker
-
-show_version:
-	$(COMMON_RUN) $(PROGRAM).py --version
-	ls -l
-
-$(PROGRAM)_portal:
-	$(COMMON_RUN) $(PROGRAM).py \
-		$(OPTIONS_TEST_PORTAL) $(SYNC) \
-		2>$@.2 | tee $@.1
-		mv $(PROGRAM).log $@.log
-
-$(PROGRAM)_cli:
-	$(COMMON_RUN) $(PROGRAM).py \
-		$(OPTIONS_TEST_CLI) $(SYNC) \
-		2>$@.2 | tee $@.1
+test_cli:
+	source $(ENV_FILE_CLI); \
+	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLI) 2>$@.2 | tee $@.1
 	mv $(PROGRAM).log $@.log
-	-grep 'download failed' *
 
-$(PROGRAM)_cli_docker:
-	$(COMMON_RUN) $(PROGRAM).py \
-		$(OPTIONS_TEST_CLI_DOCKER) $(SYNC) \
-		2>$@.2 | tee $@.1
-		mv $(PROGRAM).log $@.log
+test_cli_docker:
+	source $(ENV_FILE_CLI); \
+	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLI_DOCKER) -I 2>$@.2 | tee $@.1
+	mv $(PROGRAM).log $@.log
 
-## ==========================================
-## Build a whl and publish and test
-
-makeStubs:
-	rm -rf stubs out */*.pyi */*/*.pyi
-	mkdir stubs
-	stubgen $(PACKAGE_NAME) -o stubs
-
-build: makeStubs
-	rm -rf dist/
-	$(COMMON_VENV) \
-	$(PIP_INSTALL) build; \
-	$(MIN_PYTHON_VERSION) -m build;
-	ls -l dist
-
-testpypi: build
-	$(COMMON_VENV) \
-	$(PIP_INSTALL) twine; \
-	twine upload \
-		--config-file=$${HOME}/.pypirc_testing \
-		--repository=testpypi \
-		dist/*
-
-test_pypi_clean:
-	-pip3 uninstall $(PACKAGE) -y
-
-# ===============================================
-# to find normal dependencies with testpypi
-# use the extra index '--extra-index-url https://pypi.org/simple'
-
-PREP_INSTALL := $(PIP_INSTALL) \
-		--index-url https://test.pypi.org/simple/ \
-		--extra-index-url https://pypi.org/simple \
-		$(PACKAGE); \
-		source $(ENV_FILE); \
-		export LOG_LEVEL=INFO;
-
-# test_with_pypi: test_from_testpypi_portal test_from_testpypi_cli
-test_with_pypi: test_from_testpypi_cli
-
-test_from_testpypi_portal: testpypi test_pypi_clean
-	$(COMMON_VENV) \
-	$(PREP_INSTALL) \
-		$(PROGRAM_AFTER_INSTALL) -V; \
-		export LOG_LEVEL=DEBUG;	$(PROGRAM_AFTER_INSTALL) \
-			$(REPO_LIST_FULL) \
-			--ignore-cert-errors \
-			--verbose \
-			--portal \
-			2>$@.2 | tee $@.1
-
-test_from_testpypi_cli: test_pypi_clean
-	$(COMMON_VENV) \
-	$(PREP_INSTALL) \
-		$(PROGRAM_AFTER_INSTALL) \
-			$(REPO_LIST_FULL) \
-			--ignore-cert-errors \
-			--verbose \
-			$(CLI_OPTIONS) \
-			2>$@.2 | tee $@.1
-
-test_from_testpypi_cli_docker: test_pypi_clean
-	$(COMMON_VENV) \
-	$(PREP_INSTALL) \
-		$(PROGRAM_AFTER_INSTALL) \
-			$(REPO_LIST_FULL) \
-			--ignore-cert-errors \
-			--verbose \
-			$(CLI_DOCKER_OPTIONS) \
-			2>$@.2 | tee $@.1
-
-# =========================
-# cleanup portal and artifactory
-
-clean_both: clean_portal cleanup_artifactory_properties
-
-clean_portal:
-	export WITH_TEST_CLEANUP_ALL_PROJECTS=1; \
-	$(COMMON_RUN) ./cleanup_portal_projects.py \
-		$(REPO_LIST_FULL) \
-		-v \
-		-P | \
-		tee clean_portal.1; \
-		exit 0
-
-cleanup_artifactory_properties:
-	$(COMMON_RUN) ./cleanup_artifactory_properties.py \
-		$(REPO_LIST_FULL) \
-		-v -P --ignore-cert-errors | \
-		tee cleanup_artifactory_properties.1; \
-		exit 0
+test_portal:
+	source $(ENV_FILE_PORTAL); \
+	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_PORTAL) 2>$@.2 | tee $@.1
+	mv $(PROGRAM).log $@.log

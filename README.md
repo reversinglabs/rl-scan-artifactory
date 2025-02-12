@@ -10,7 +10,8 @@ The `rl-scan-artifactory` integration is most suitable for existing Spectra Assu
 
 Depending on your use-case, the integration can rely on the Spectra Assure CLI (rl-secure or Docker image) or the Spectra Assure Portal when scanning artifacts.
 
-It also allows for flexible workflows where you can scan some repositories with the Portal while scanning others with the CLI (for example, if a repository contains artifacts you don't want to upload to the Portal).
+It also allows for flexible workflows where you can scan some repositories with the Portal while scanning others with the CLI
+(for example, if a repository contains artifacts you don't want to upload to the Portal).
 Such combined workflows require an active license for both Spectra Assure products.
 
 > **Note: This documentation assumes that you already have experience with JFrog Artifactory and with Python scripts.**
@@ -18,20 +19,24 @@ Such combined workflows require an active license for both Spectra Assure produc
 
 ### What is Spectra Assure?
 
-The [Spectra Assure platform](https://www.reversinglabs.com/products/software-supply-chain-security) is a set of ReversingLabs products primarily designed for software assurance and software supply chain security use-cases.
+The [Spectra Assure platform](https://www.reversinglabs.com/products/software-supply-chain-security)
+is a set of ReversingLabs products primarily designed for software assurance and software supply chain security use-cases.
 
-It helps users protect their software supply chains by analyzing compiled software packages, their components and third-party dependencies to detect exposures, reduce vulnerabilities, and eliminate threats before reaching production.
+It helps users protect their software supply chains by analyzing compiled software packages,
+their components and third-party dependencies to detect exposures, reduce vulnerabilities, and eliminate threats before reaching production.
 
-Users can choose to work with Spectra Assure as an on-premises [CLI tool](https://docs.secure.software/cli/), a ReversingLabs-hosted [SaaS solution called Portal](https://docs.secure.software/portal/), or use Spectra Assure [Docker images and integrations](https://docs.secure.software/integrations) in their CI/CD pipelines.
+Users can choose to work with Spectra Assure as an on-premises [CLI tool](https://docs.secure.software/cli/),
+a ReversingLabs-hosted [SaaS solution called Portal](https://docs.secure.software/portal/),
+or use Spectra Assure [Docker images and integrations](https://docs.secure.software/integrations) in their CI/CD pipelines.
 
 
 ## How this integration works
 
 This integration relies on [user-specified parameters](#parameters) to:
 
-- check for [supported artifact types](#supported-artifactory-package-types) in the specified Artifactory repositories
-- scan the supported artifacts with the specified Spectra Assure product
-- save analysis reports to Artifactory and update artifact metadata with scan results and status information
+- check for [supported artifact types](#supported-artifactory-package-types) in the specified Artifactory repositories.
+- scan the supported artifacts with the specified Spectra Assure product.
+- save analysis reports to Artifactory and update artifact metadata with scan results and status information.
 
 
 ![SVG rl-scan-artifactory](doc/rl-scan-artifactory.drawio.svg)
@@ -46,11 +51,24 @@ The integration downloads the artifacts to a temporary directory and scans them 
 
 The following products are supported:
 
-- **Spectra Assure CLI (rl-secure)**. In this workflow, the integration scans artifacts locally without uploading them to ReversingLabs. To scan the artifacts, `rl-secure` must be installed on the machine and a permanent package store must be initialized. Analysis reports are automatically uploaded to Artifactory as a compressed file. This workflow is ideal for users already familiar with the Spectra Assure CLI, and for those who need to scan their artifacts exclusively on-premises.
+- **Spectra Assure CLI (rl-secure)**. In this workflow, the integration scans artifacts locally without uploading them to ReversingLabs.
+To scan the artifacts, `rl-secure` must be installed on the machine and a permanent package store must be initialized.
+Analysis reports are automatically uploaded to Artifactory as a compressed file.
+This workflow is ideal for users already familiar with the Spectra Assure CLI, and for those who need to scan their artifacts exclusively on-premises.
 
-- **Spectra Assure CLI Docker image [reversinglabs/rl-scanner](https://hub.docker.com/r/reversinglabs/rl-scanner)**. In this workflow, the integration scans artifacts locally inside the Docker container, without uploading them to ReversingLabs. To scan the artifacts, the `rl-scanner` Docker image is used to run `rl-secure` in a container. A package store must be initialized. The `sync` option is not supported. This workflow is ideal for users who want to scan their artifacts in ephemeral environments.
+- **Spectra Assure CLI Docker image [reversinglabs/rl-scanner](https://hub.docker.com/r/reversinglabs/rl-scanner)**.
+In this workflow, the integration scans artifacts locally inside the Docker container, without uploading them to ReversingLabs.
+To scan the artifacts, the `rl-scanner` Docker image is used to run `rl-secure` in a container.
+A package store must be initialized.
+The `sync` option is not supported.
+Analysis reports are automatically uploaded to Artifactory as a compressed file.
+This workflow is ideal for users who want to scan their artifacts in ephemeral environments.
 
-- **Spectra Assure Portal**. In this workflow, the integration uploads artifacts to a Portal instance for scanning. The Portal account used for scanning must have valid credentials, and enough analysis capacity configured on the Portal. The analysis report is accessible on the Portal and linked in the artifact metadata properties. This workflow is ideal for users already familiar with the Spectra Assure Portal, and for those who want a quick way to share analysis reports with internal and external stakeholders.
+- **Spectra Assure Portal**. In this workflow, the integration uploads artifacts to a Portal instance for scanning.
+The Portal account used for scanning must have valid credentials, and enough analysis capacity configured on the Portal.
+The analysis report is accessible on the Portal and linked in the artifact metadata properties.
+This workflow is ideal for users already familiar with the Spectra Assure Portal,
+and for those who want a quick way to share analysis reports with internal and external stakeholders.
 
 After the scan has finished, the integration applies [metadata properties](#artifactory-properties) on the scanned artifacts in Artifactory.
 
@@ -85,6 +103,12 @@ Virtual repository types are currently not supported.
 
 Cache repositories are implicitly used for all remote repository types.
 
+### Writable repositories
+
+In CLI workflows (with rl-secure or with the Docker image), analysis reports in user-specified formats are uploaded to Artifactory.
+
+- For `local` repositories: the repository must be writable by the account executing the scan.
+- For `remote` repositories: a custom, writable, local repository must be specified where the reports can be stored.
 
 ### Supported Artifactory package types
 
@@ -186,7 +210,7 @@ Depending on the product choice, some parameters may be ignored because they are
 | --ignore-artifactory-properties, -I | If specified, the integration will ignore any existing properties set for the scanned artifacts in Artifactory. |
 | --verbose, -v    | Display more detailed progress messages and scan results on stdout. |
 | --version, -V    | Show currently installed version of the integration and exit. |
-
+| --cli-report-types | A comma-separated list of report formats to generate when using cli or cli-docker mode. <br />Supported values: `cyclonedx`, `rl-checks`, `rl-cve`, `rl-html`, `rl-json`, `rl-uri`, `sarif`, `spdx`, `all`. <br />Default: `all` |
 
 ### Artifactory properties
 
@@ -210,12 +234,14 @@ All properties have the `RL` prefix to indicate they are custom properties set b
 
 ## Working with Docker images
 
+### Versioning
 When Docker images are uploaded to Artifactory, they typically come with `manifest.json` files that describe each Docker image and its layers.
 However, the file path to `manifest.json` may not have a version.
-In that case, the integration will extract a version (if present) from the `config` or an associated `list.manifest.json`.
+In that case, the integration will try to extract a version from the `config` or an associated `list.manifest.json`.
 
-For Docker images, the integration currently sets metadata properties only on the `manifest.json` file.
-As a result, the [rlBlock Artifactory plugin](tools/rlBlock/README.md) does not support Docker images because it only blocks the `manifest.json` download.
+### Compatibility with rlBlock
+In order for the `rlBlock` plugin to work properly,
+Artifactory properties are set recursively on the directory containing the `manifest.json` file and all files under it.
 
 
 ### Marker files
@@ -228,9 +254,12 @@ To resolve this issue, you can use the [fix_marker.sh](tools/fix_marker.sh) scri
 
 ## Working with generic repositories
 
-Scanning repositories with the package type 'generic' requires a custom `.rl_meta` file for each artifact, and is only supported when scanning with the Spectra Assure Portal.
+Scanning repositories with the package type 'generic' requires a custom `.rl_meta` file for each artifact to allow creating proper package URLs.
 
-The file must be in `ini` format with a mandatory section called `rl_meta` like in the following example.
+- When scanning with `--portal`, only those artifacts with the `.rl_meta` file will be scanned.
+- When scanning with `--cli` or `--cli-docker`, artifacts without the `.rl-meta` file will get a dummy package URL in the format `<repo name>/<filename>@v0`.
+
+The custom `.rl_meta` file must be in `ini` format with a mandatory section called `rl_meta` like in the following example.
 
 File name: `mypackagename-windows-arm_v8-1.0.99.rl_meta`
 

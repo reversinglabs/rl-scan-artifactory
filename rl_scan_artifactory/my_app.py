@@ -51,7 +51,11 @@ class MyApp(
         super().__init__(args)
         self._validate_params()
         self.artifactory_api = ArtifactoryApi(args=args)
-        self.spectra_assure_api = SpectraAssureApi(args=args)
+
+        self.spectra_assure_api = None
+        if self.cli_args.get("portal") is True:
+            self.spectra_assure_api = SpectraAssureApi(args=args)
+
         self.verbose = self.cli_args["verbose"]
         self.WITH_TEST_LIMIT_REPO_TO = int(os.getenv("WITH_TEST_LIMIT_REPO_TO", 0))
         self.not_finished: List[ArtifactoryFileProcessorCommon] = []
@@ -64,6 +68,10 @@ class MyApp(
             user=self.cli_args.get("proxy_user"),
             password=self.cli_args.get("proxy_password"),
         )
+
+    def my_print(self, msg: str) -> None:
+        logger.info(msg)
+        print(msg)
 
     @staticmethod
     def _now_string_compact() -> str:
@@ -172,15 +180,16 @@ class MyApp(
         if info.report:
             report = info.report
             if "https://" not in report:
-                base = afp.make_report_base()
+                base = afp._portal_make_report_base()
                 report = f"{base}/{report}"
-
             zz.append(f"report: {report}")
 
         elapsed = time.time() - start
         elapsed_str = f"took: {int(elapsed / 60)}m %2.0fs" % (elapsed % 60)
         zz.append(elapsed_str)
-        print(f"{'; '.join(zz)}")
+
+        msg = f"{'; '.join(zz)}"
+        self.my_print(msg)
 
     def _run_one_repo_one_artifact(
         self,
@@ -189,10 +198,20 @@ class MyApp(
         artifact_item: Dict[str, Any],
         repo_db: Dict[str, Any],
     ) -> str:
-        logger.debug("%s", p_type)
-        portal_mode = self.cli_args.get("portal") is True
+        """
+        inspect one artifact file
+
+        params:
+        - repo:     what is the repo we are currently processing.
+        - p_type:   what is the package_type.
+        - artifact_item: the info artifactory has for this artifact s dict.
+        - repo_db:  a place we can collect data that may be usefull for other artifacts
+            e.g. docker images consist of multiple files in a tree
+            we can also use it to collect meta files for p_type: `generic`
+        """
 
         start: float = time.time()
+
         afp = self._get_my_afp(  # ArtifactoryFileProcessor
             p_type=p_type,
             repo=repo,
@@ -200,40 +219,115 @@ class MyApp(
             repo_db=repo_db,
         )
 
-        if artifact_item.get("uri", "").lower().endswith(META_STRING) and not portal_mode:
-            # in portal mode mate files stand for real files so we need them
-            logger.debug("skip meta %s", artifact_item.get("uri", ""))
+        uri = artifact_item.get("uri", "")
+        portal_mode = self.cli_args.get("portal") is True
+        uri_l = uri.lower()
+
+        if uri_l.endswith(META_STRING) and not portal_mode:
+            # in portal mode meta files are mandatory and stand for real files
+            logger.debug("skip meta %s", uri_l)
             return PROCESS_FILE_SKIP
 
-        if artifact_item.get("uri", "").lower().endswith(CLI_REPORTS_FILE_TAIL):
-            logger.debug("skip report file %s", artifact_item.get("uri", ""))
+        if uri_l.endswith(CLI_REPORTS_FILE_TAIL):
+            logger.debug("skip report file %s", uri_l)
             return PROCESS_FILE_SKIP
 
-        print(f"Inspecting {repo.name}:{artifact_item.get('uri', '')}")
+        msg = f"Inspecting {repo.name}:{uri}"
+        self.my_print(msg)
 
         completed = afp.process()
-
-        if portal_mode:
-            if completed is False:  # TODO: fix_not scanned for exists on portal and exists on artifactory
-                self.not_finished.append(afp)
+        if completed is False:
+            if portal_mode:
+                self.not_finished.append(afp)  # save for later inspection
 
         self._print_info_report(
             afp=afp,
             start=start,
         )
 
-        logger.debug("%s", afp.files_to_remove)
         afp.remove_my_files()
 
         return afp.get_process_status()
+
+    def _is_cli_and_remote_and_no_reports_location_specified(
+        self,
+        repo: ArtifactoryRepoInfo,
+    ) -> bool:
+        if self.cli_args.get("cli") is True:
+            if repo.repo_type == "remote":
+                if self.cli_args.get("cli_reports_repo") is None:
+                    return True
+        return False
+
+    def _is_cli_and_local_and_current_repo_is_reports_location(
+        self,
+        repo: ArtifactoryRepoInfo,
+    ) -> bool:
+        if self.cli_args.get("cli") is True:
+            if repo.repo_type == "local":
+                if self.cli_args.get("cli_reports_repo") is not None:
+                    if repo.name == self.cli_args.get("cli_reports_repo"):
+                        return True
+        return False
+
+    def _is_cli_and_uri_ends_with_reports_tail(
+        self,
+        uri: str,
+    ) -> bool:
+        if self.cli_args.get("cli") is True:
+            if uri.lower().endswith(CLI_REPORTS_FILE_TAIL):
+                return True
+
+        if uri.lower().endswith(CLI_REPORTS_FILE_TAIL):
+            # during internal testing we mix portal and cli in the same artifactory instance
+            # so skip the report tails always
+            return True
+
+        return False
+
+    def _repo_generic_extract_rl_meta_info(
+        self,
+        arp: ArtifactoryRepoProcessor,
+        repo_db: Dict[str, Any],
+    ) -> None:
+        """Find all files ending in .rl_meta and extract the meta info"""
+        repo = arp.get_repo()
+        p_type = arp.p_type
+
+        for artifact_item in arp.process():
+            uri = artifact_item.get("uri", "")
+            if not uri.lower().endswith(META_STRING):
+                continue
+
+            afp = self._get_my_afp(  # ArtifactoryFileProcessor
+                p_type=p_type,
+                repo=repo,
+                artifact_item=artifact_item,
+                repo_db=repo_db,
+            )
+
+            zz = afp.extract_generic_meta_info()
+            meta = zz.get("meta")
+
+            msg = f"Uri: {uri} -> {zz}"
+            if meta is not None:
+                if meta.get("path"):
+                    k = "/"
+                    uri_path = k.join(uri.split(k)[:-1])
+                    file = uri_path + k + meta["path"]
+                    # set the path of the file in the meta to the same path as the current meta file
+                    repo_db[file] = zz
+                    msg = f"Uri: {uri} -> {file} {zz}"
+
+            logger.debug(msg)
+            logger.debug("%s %s", uri, zz)
 
     def _run_one_repo_all_artifacts(  # noqa: C901
         self,
         repo_name: str,
     ) -> None:
         msg = f"Start processing repo: {repo_name}"
-        logger.info(msg)
-        print(msg)
+        self.my_print(msg)
 
         arp = ArtifactoryRepoProcessor(
             cli_args=self.cli_args,
@@ -244,42 +338,42 @@ class MyApp(
         repo = arp.get_repo()
         p_type = arp.p_type
 
-        if self.cli_args.get("cli") is True:
-            if repo.repo_type == "remote":
-                if self.cli_args.get("cli_reports_repo") is None:
-                    t = "processing with cli is not supported, we cannot upload the report"
-                    msg = f"REPO SKIP: {repo.name} {repo.repo_type}; {t}"
-                    logger.warning(msg)
-                    if self.verbose:
-                        zz = [self._now_string_compact(), msg]
-                        print(f"{'; '.join(zz)}")
-                    return
+        if self._is_cli_and_remote_and_no_reports_location_specified(repo):
+            t = "processing with cli is not supported, we cannot upload the report"
+            msg = f"REPO SKIP: {repo.name} {repo.repo_type}; {t}"
+            logger.warning(msg)
+            if self.verbose:
+                zz = [self._now_string_compact(), msg]
+                msg = f"{'; '.join(zz)}"
+                self.my_print(msg)
+            return
 
-            if repo.repo_type == "local":
-                if self.cli_args.get("cli_reports_repo") is not None:
-                    if repo.name == self.cli_args.get("cli_reports_repo"):
-                        t = "if option 'cli_reports_repo' is given, that local repo will not be scanned"
-                        msg = f"REPO SKIP: {repo.name} {repo.repo_type}; {t}"
-                        logger.warning(msg)
-                        if self.verbose:
-                            zz = [self._now_string_compact(), msg]
-                            print(f"{'; '.join(zz)}")
-                        return
+        if self._is_cli_and_local_and_current_repo_is_reports_location(repo):
+            t = "if option 'cli_reports_repo' is given, that local repo will not be scanned"
+            msg = f"REPO SKIP: {repo.name} {repo.repo_type}; {t}"
+            logger.warning(msg)
+            if self.verbose:
+                zz = [self._now_string_compact(), msg]
+                msg = f"{'; '.join(zz)}"
+                self.my_print(msg)
+            return
 
         # ----------------------------------------
-        n = 0
+        # the repo_db can collect info on items we need later: docker json files
+        # we can also collect meta files for cli and generic
         repo_db: Dict[str, Any] = {}
+
+        # lets extract all meta files we can find
+        if p_type == "generic":
+            self._repo_generic_extract_rl_meta_info(arp, repo_db)
+
+        n = 0
         for artifact_item in arp.process():
-            if self.cli_args.get("cli") is True and artifact_item.get("uri", "").lower().endswith(
-                CLI_REPORTS_FILE_TAIL
-            ):
+            uri = artifact_item.get("uri", "")
+            if self._is_cli_and_uri_ends_with_reports_tail(uri=uri):
                 continue
 
-            if artifact_item.get("uri", "").lower().endswith(CLI_REPORTS_FILE_TAIL):
-                # during internal testing we mix portal and cli in the same artifactory instance so skip the reports
-                continue
-
-            logger.debug("%s", artifact_item.get("uri", "").lower())
+            logger.debug("%s", uri)
 
             reason = self._run_one_repo_one_artifact(
                 repo=repo,
@@ -303,32 +397,36 @@ class MyApp(
             )
             break
 
-    def finish_any_pending(
+    def _finish_any_pending(
         self,
     ) -> None:
         for afp in self.not_finished:
             afp.max_time = 60 * 60 * 2  # wait max 2 hours on retry
 
             if self.verbose:
-                print(f"processing not finished item: {afp.get_uri()}")
+                msg = f"processing not finished item: {afp.get_uri()}"
+                self.my_print(msg)
 
             start: float = time.time()
             afp.process()
-            afp.remove_my_files()  # later add as destructor
+            afp.remove_my_files()
 
             self._print_info_report(
                 afp=afp,
                 start=start,
             )
 
+    def _if_print_version_and_exit(self) -> None:
+        if self.cli_args.get("version", "") is True:
+            msg = f"version: {VERSION}"
+            self.my_print(msg)
+            sys.exit(0)
+
+    # PUBLIC
     def run_all(
         self,
     ) -> None:
-        if self.cli_args.get("version", "") is True:
-            logger.info("version: %s", VERSION)
-            print(f"Version: {VERSION}")
-            sys.exit(0)
-
+        self._if_print_version_and_exit()
         self.not_finished = []
 
         repo_names = self.cli_args.get("repo", [])
@@ -336,4 +434,4 @@ class MyApp(
             self._run_one_repo_all_artifacts(repo_name)
 
         if self.cli_args.get("portal") is True:
-            self.finish_any_pending()
+            self._finish_any_pending()

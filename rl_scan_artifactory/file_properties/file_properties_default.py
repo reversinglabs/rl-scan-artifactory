@@ -75,4 +75,4 @@ class FilePropertiesDefault(
     def skip_non_candidate_file(
         self,
     ) -> bool:
-        return self._generic_filter_on_item_properties()
+        return self._common_filter_on_item_properties()

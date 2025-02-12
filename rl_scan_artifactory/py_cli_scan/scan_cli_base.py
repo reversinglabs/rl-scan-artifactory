@@ -13,7 +13,10 @@ import zipfile
 
 
 from .results import Results
-from ..constants import CLI_REPORTS_FILE
+from ..constants import (
+    CLI_REPORTS_FILE,
+    CliReportFormatList,
+)
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -32,6 +35,7 @@ class ScanCliBase:
     temp_dir: tempfile.TemporaryDirectory[str] | None
     scan_status: int | None
     store: str | None = None
+    reports_list: List[str]
 
     def __init__(
         self,
@@ -39,10 +43,11 @@ class ScanCliBase:
         purl: str,
         store: str | None = None,
         temp_dir_path: str | None = None,  # you handle temp_dir yourself, must be empty
+        reports_list: List[str] | None = None,
     ) -> None:
         # ----------------------------------------
         self.temp_dir = None  # must be first
-
+        self.reports_list = [] if reports_list is None else reports_list
         # ----------------------------------------
         self.purl: str = purl
         self.store = store
@@ -185,3 +190,19 @@ class ScanCliBase:
             raise Exception("the report bundle is not available (yet)")
 
         return report_bundle_path
+
+    def set_report_list(
+        self,
+        reports_list: List[str],
+    ) -> None:
+        if "all" in reports_list:
+            self.reports_list = ["all"]
+            return
+
+        out_list: List[str] = []
+        for report_name in reports_list:
+            if report_name in CliReportFormatList:
+                if report_name not in out_list:
+                    out_list.append(report_name)
+
+        self.reports_list = out_list

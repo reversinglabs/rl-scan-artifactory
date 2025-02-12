@@ -29,7 +29,7 @@ class ArtifactoryFileProcessorDocker(
         self,
         *,
         cli_args: Dict[str, Any],
-        spectra_assure_api: SpectraAssureApi,
+        spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo: ArtifactoryRepoInfo,
         artifact_item: Dict[str, Any],
@@ -45,6 +45,7 @@ class ArtifactoryFileProcessorDocker(
         )
         self.process_status: str | None = None
         self.docker_version: str | None = None
+        self.config_digest_uri: str | None = None
 
     def _process_one_docker_manifest_item(
         self,
@@ -118,14 +119,32 @@ class ArtifactoryFileProcessorDocker(
         aa = input_name.split("/")
         return "_".join(aa)
 
+    def make_config_uri(self, config_digest: str) -> None:
+        aa = self.uri.split("/")[:-1]
+        aa.append(
+            config_digest.replace(
+                ":",
+                "__",
+            ),
+        )
+        self.config_digest_uri = "/".join(aa)
+
+        # if we block the config_file we block the docker download
+        logger.debug("config_uri %s", self.config_digest_uri)
+
     def _read_config_digest_docker(
         self,
         config_digest: str,
     ) -> Dict[str, Any] | None:
         # prep
+        self.make_config_uri(config_digest)
+
         base_a = self.uri.split("/")[:-1]
         cd_a = config_digest.split(":")
         config_digest_file_path = self.download_dir + "/" + "_".join(base_a) + "_" + "__".join(cd_a)
+
+        # if we block the config_file we block the docker download
+        logger.debug("%s", self.config_digest_uri)
 
         # read
         try:
@@ -139,8 +158,7 @@ class ArtifactoryFileProcessorDocker(
         rr: Dict[str, Any] = {}
         for k, v in data.items():
             rr[k] = v
-
-        logger.debug("config_data: %s", rr)
+        logger.debug("%s", rr)
         return rr
 
     def _make_tar_file_name_bundle_docker(

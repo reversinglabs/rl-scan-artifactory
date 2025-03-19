@@ -1,4 +1,5 @@
-# rl-scan-artifactory [![RL Status Badge](https://secure.software/pypi/badge/rl-scan-artifactory)](https://secure.software/pypi/badge/rl-scan-artifactory)
+# rl-scan-artifactory [![RL Status Badge](https://secure.software/pypi/badge/rl-scan-artifactory)](https://secure.software/pypi/packages/rl-scan-artifactory)
+
 ReversingLabs provides the official Spectra Assure integration for [JFrog Artifactory](https://jfrog.com/artifactory/) to help software producers protect their organization, their development and build environments, and their customers by continuously monitoring and scanning software artifacts in Artifactory repositories.
 **Only self-hosted Artifactory instances are supported**.
 

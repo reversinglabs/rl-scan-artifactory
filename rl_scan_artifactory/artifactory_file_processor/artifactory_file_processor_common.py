@@ -326,6 +326,7 @@ class ArtifactoryFileProcessorCommon(
         if is_uploaded is False:
             msg = f"skip: no upload to portal for: {purl}; {optional_msg}"
             logger.error(msg)
+            print(msg)
 
             self.processing_info.completed = True
             self.processing_info.status = PROCESS_FILE_SKIP
@@ -348,6 +349,45 @@ class ArtifactoryFileProcessorCommon(
         self._remove_files([file_path])
 
         return is_uploaded
+
+    def artifactory_report_url_needs_space(self) -> bool:  # noqa: ignore=C901, too complex
+        # if artifactory version < 7.104.5 add the space to the report url to make it vizible
+
+        version_dict = self.cli_args.get("_artifactory_version")
+        if version_dict is None:
+            return True
+
+        version_string = version_dict.get("version")
+        if version_string is None:
+            return True
+
+        version_triple = version_string.split(".")
+        if len(version_triple) < 3:
+            return True
+
+        try:
+            v1 = int(version_triple[0])
+            v2 = int(version_triple[1])
+            v3 = int(version_triple[2])
+        except Exception as e:
+            logger.exception("version convert to int triple fails: %s; %s", version_triple, e)
+            return True
+
+        if v1 < 7:
+            return True
+        if v1 > 7:
+            return False
+        assert v1 == 7
+
+        if v2 < 104:
+            return True
+        if v2 > 104:
+            return False
+        assert v2 == 104
+
+        if v3 < 5:
+            return True
+        return False
 
     def set_props_all(  # noqa: ignore=C901, too complex
         self,
@@ -416,11 +456,14 @@ class ArtifactoryFileProcessorCommon(
                 if report is None or len(report) == 0:
                     continue
 
+                if self.artifactory_report_url_needs_space() is True:
+                    report = " " + report  # apparently one space in front fixes the no view issue
+
                 self.artifactory_api.set_one_prop(
                     repo=repo,
                     item_uri=uri,
                     key=p,
-                    value=f" {report}",  # apparently one space in front fixes the no view issue
+                    value=report,
                     recursive=recursive,
                 )
                 continue
@@ -999,6 +1042,14 @@ class ArtifactoryFileProcessorCommon(
             )
             sys.exit(101)
 
+        scan_cli.cleanup()
+        logger.debug("%s", report_url)
+
+        self._update_artifactory_item_with_scan_status(
+            scan_status=scan_status,
+            report=report_url,
+        )
+
         if self.repo.repo_type != "remote":
             logger.debug("%s %s %s", self.repo.repo_type, self.repo, report_uri)
 
@@ -1008,16 +1059,24 @@ class ArtifactoryFileProcessorCommon(
                 key=PROP_NAME_SPECTRA_ASSURE_NOSCAN,
                 value="true",
             )
+            # with recursive docker tagging we now tagged the report file
+            # if 'fail' that blocks the report download
+            # remove the fail tag from the reports.zip (or all RL tags)
+            # https://alt-artifactory-dev.rl.lan/artifactory
+            #  /docker-local/cicd-builds/java-hello-world/30/manifest.json-reports.zip
 
-        # TODO: test with docker
-
-        scan_cli.cleanup()
-        logger.debug("%s", report_url)
-
-        self._update_artifactory_item_with_scan_status(
-            scan_status=scan_status,
-            report=report_url,
-        )
+            logger.debug("clear props from report: %s", report_uri)
+            self.artifactory_api.del_one_prop(
+                repo=self.repo,
+                item_uri=report_uri,
+                key=PROP_NAME_SPECTRA_ASSURE_SCAN_STATUS,
+            )
+            self.artifactory_api.put_one_prop(
+                repo=self.repo,
+                item_uri=report_uri,
+                key=PROP_NAME_SPECTRA_ASSURE_SCAN_STATUS,
+                value="__novalue__",
+            )
 
         self.processing_info.completed = True
         self.processing_info.status = PROCESS_FILE_UPDATED

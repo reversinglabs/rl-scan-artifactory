@@ -28,15 +28,18 @@ class SpectraAssureApi(
     ) -> None:
         super().__init__(args)
 
+        self.host: str | None = None
         self.server: str | None = None
         self.group: str | None = None
         self.org: str | None = None
 
+        self.host = self.cli_args.get("rlportal_host")
         self.server = self.cli_args.get("rlportal_server")
         self.group = self.cli_args.get("rlportal_group")
         self.org = self.cli_args.get("rlportal_org")
+        #
         token = self.cli_args.get("rlportal_access_token")
-
+        #
         proxy_server = self.cli_args.get("proxy_server")
         proxy_port = self.cli_args.get("proxy_port")
         proxy_user = self.cli_args.get("proxy_user")
@@ -47,12 +50,17 @@ class SpectraAssureApi(
 
         # very large uploads will need a bit bigger timeout
         self.api_client = SpectraAssureApiOperations(
+            host=self.host,
             server=self.server,
+            #
             organization=self.org,
             group=self.group,
+            #
             token=token,
+            #
             auto_adapt_to_throttle=True,
             timeout=PORTAL_UPLOAD_TIMEOUT,  # 2 hours
+            #
             proxy_server=proxy_server,
             proxy_port=proxy_port,
             proxy_user=proxy_user,

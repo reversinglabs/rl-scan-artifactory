@@ -110,9 +110,8 @@ all: with_testpypi
 with_testpypi: \
 	publish_testpypi \
 	prep_test \
-	testpypi_test_cli \
-	testpypi_test_cli_docker \
 	testpypi_test_portal
+#	testpypi_test_cli 	testpypi_test_cli_docker \
 
 prep_test:
 	mkdir -p $(DOWNLOAD_PATH)

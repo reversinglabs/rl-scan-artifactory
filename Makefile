@@ -49,7 +49,7 @@ COMMON_VENV := rm -rf $(VENV); \
 
 # ==========================================
 
-all: clean prep test
+all: clean prep build test
 
 clean: cleanupVenv
 	rm -f *.1 *.2 *.log *.tmp  1 2

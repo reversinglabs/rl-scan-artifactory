@@ -84,15 +84,29 @@ class FilePropertiesDocker(
             file=self.file,
         )
 
-        aa = self.uri.split("/")  # len should be 4 <org>/<name>/<version>/<manifest_json>
+        aa = self.uri.split("/")
         logger.debug("%s", aa)
-
         assert aa[0] == ""  # the starting / makes aa[0] == ""
-        assert len(aa) >= 5
+        aa.pop(0)
+
+        tail = aa.pop()
+        assert tail.endswith(self.k)
+
+        # for remote docker repo's: len should be 5 /<org>/<name>/<version>/<manifest_json>
+        # for local we may not have a org part
+        # e.g upload python/alpine results in /python/alpine/manifest.json
+
+        version = aa.pop()
+        name = aa.pop()
+
+        if len(aa) > 0:
+            org = aa.pop()
+            if len(org) > 0:
+                name = f"{org}/{name}"
 
         front = f"{self.what}._derived_"
-        self.props[f"{front}.name"] = [f"{aa[1]}/{aa[2]}"]
-        self.props[f"{front}.version"] = [f"{aa[3]}"]
+        self.props[f"{front}.name"] = [name]
+        self.props[f"{front}.version"] = [version]
 
         logger.debug("properties are now: %s", str(self.props))
         self.file.properties = self.props

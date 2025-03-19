@@ -456,6 +456,17 @@ class ArtifactoryApi(ArtifactoryApiBase):
 
         return qp_out
 
+    def get_artifactory_version(self) -> Any:
+        # https://alt-artifactory-dev.rl.lan/artifactory/api/system/version
+        url = f"{self.base_url}/api/system/version"
+
+        r = self._request_get(url)
+        if r.status_code < 200 or r.status_code >= 300:
+            return {}
+
+        logger.debug("result: %s", r.json())
+        return r.json()
+
     def search_prop_fail(
         self,
         repo_list: List[str] | None = None,
@@ -625,7 +636,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
         recursive: bool = False,
     ) -> bool:
         # DELETE /api/storage/libs-release-local/ch/qos/logback/logback-classic/0.9.9?properties=os,qa&recursive=0
-        logger.debug("%s %s %s", item_uri, key, recursive)
+        logger.debug("del prop %s:%s %s %s", repo.name, item_uri, key, recursive)
 
         repo_name = repo.name
         if repo.repo_type.lower() == "remote":

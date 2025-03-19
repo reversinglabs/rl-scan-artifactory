@@ -50,6 +50,7 @@ class MyApp(
     ) -> None:
         super().__init__(args)
         self._validate_params()
+        logger.debug("args: %s", args)
         self.artifactory_api = ArtifactoryApi(args=args)
 
         self.spectra_assure_api = None
@@ -59,8 +60,6 @@ class MyApp(
         self.verbose = self.cli_args["verbose"]
         self.WITH_TEST_LIMIT_REPO_TO = int(os.getenv("WITH_TEST_LIMIT_REPO_TO", 0))
         self.not_finished: List[ArtifactoryFileProcessorCommon] = []
-
-        logger.debug("%s", args.cli_args)
 
         self.proxies: Dict[str, str] = set_proxy(
             server=self.cli_args.get("proxy_server"),
@@ -249,6 +248,16 @@ class MyApp(
 
         return afp.get_process_status()
 
+    def _is_portal_and_remote_and_no_reports_location_specified(
+        self,
+        repo: ArtifactoryRepoInfo,
+    ) -> bool:
+        if self.cli_args.get("portal") is True:
+            if repo.repo_type == "remote":
+                if self.cli_args.get("cli_reports_repo") is None:
+                    return True
+        return False
+
     def _is_cli_and_remote_and_no_reports_location_specified(
         self,
         repo: ArtifactoryRepoInfo,
@@ -338,8 +347,11 @@ class MyApp(
         repo = arp.get_repo()
         p_type = arp.p_type
 
+        # for portal we only store a report url st that works as property
+        # for cli we upload reports, that only works on local so if we are remote we need a report location
+
         if self._is_cli_and_remote_and_no_reports_location_specified(repo):
-            t = "processing with cli is not supported, we cannot upload the report"
+            t = "processing with cli is not supported, missing report location: we cannot upload the report"
             msg = f"REPO SKIP: {repo.name} {repo.repo_type}; {t}"
             logger.warning(msg)
             if self.verbose:
@@ -422,12 +434,35 @@ class MyApp(
             self.my_print(msg)
             sys.exit(0)
 
+    def _verify_portal_connect(self) -> None:
+        """connect to the portal with server org and group,
+        assert they exist
+        """
+        assert self.spectra_assure_api is not None
+        try:
+            rr = self.spectra_assure_api.api_client.list()
+            data = rr.json()  # expect >= 0 results (projects)
+            logger.debug("list projects: %s", data)
+        except Exception as e:
+            logger.exception("no valid result from list projects: %s", e)
+            msg = "Fatal: Server, Org and Group parameter check failed, please verify their correctness."
+            logger.error(msg)
+            print(msg)
+            sys.exit(101)
+        return
+
     # PUBLIC
     def run_all(
         self,
     ) -> None:
         self._if_print_version_and_exit()
         self.not_finished = []
+        if self.cli_args.get("portal") is True:
+            self._verify_portal_connect()
+
+        version = self.artifactory_api.get_artifactory_version()
+        self.cli_args["_artifactory_version"] = version
+        logger.debug("artifactory_version: %s", version)
 
         repo_names = self.cli_args.get("repo", [])
         for repo_name in repo_names:

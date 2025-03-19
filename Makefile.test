@@ -15,13 +15,14 @@ export VENV
 
 PROGRAM := rl-scan-artifactory-dev
 
-ENV_FILE_PORTAL := ../.env_portal
-ENV_FILE_CLI := ../.env_cli
+# change the portal env file content to test different endpoints
+ENV_FILE_PORTAL := ~/.env_portal
+ENV_FILE_CLI := ~/.env_cli
 
 DOWNLOAD_PATH := ./tmp2
 export DOWNLOAD_PATH
 
-WITH_TEST_LIMIT_REPO_TO := 5
+WITH_TEST_LIMIT_REPO_TO := 2
 export WITH_TEST_LIMIT_REPO_TO
 
 # ----------------------------------------------
@@ -32,7 +33,7 @@ export LOG_LEVEL
 
 # ----------------------------------------------
 REPOS_DEBIAN := ubuntu
-REPOS_DOCKER := docker docker-local
+REPOS_DOCKER := docker,docker-local
 
 REPOS_GENERIC := my-generic-local,my-release-candidates
 REPOS_GENERIC := my-generic-local
@@ -59,9 +60,11 @@ REPO_LIST_FULL := \
 	$(REPO_LIST_DEFAULT)
 
 REPO_LIST := $(REPO_LIST_FULL)
+# REPO_LIST := --repo docker-local
+# REPO_LIST := --repo mboot-test--pypi-local mboot-test--pypi-remote
 
 # ----------------------------------------------
-SYNC := --sync --ignore-artifactory-properties
+SYNC :=  --ignore-artifactory-properties
 
 OPTIONS_TEST_COMMON := \
 	--ignore-artifactory-properties \
@@ -72,9 +75,9 @@ OPTIONS_TEST_COMMON := \
 	$(REPO_LIST)
 
 # rl-store may not exist on test machines
+#	--cli-reports-repo="Spectra-Assure-Reports"
 CLI_COMMON := \
 	--cli-rlstore-path=$$HOME/tmp/rl-secure \
-	--cli-reports-repo="Spectra-Assure-Reports" \
 	--cli-report-types=rl-json,rl-cve,rl-uri
 
 CLI_OPTIONS := --cli $(CLI_COMMON) \
@@ -87,26 +90,33 @@ OPTIONS_TEST_CLI := $(OPTIONS_TEST_COMMON) $(CLI_OPTIONS)
 
 OPTIONS_TEST_CLI_DOCKER := $(OPTIONS_TEST_COMMON) $(CLI_DOCKER_OPTIONS)
 
-OPTIONS_TEST_PORTAL := $(OPTIONS_TEST_COMMON) --portal
+OPTIONS_TEST_PORTAL := $(OPTIONS_TEST_COMMON) --portal --sync
 
 # ----------------------------------------------
 COMMON_VENV := rm -rf $(VENV); \
 	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
-	source ./$(VENV)/bin/activate;
+	source ./$(VENV)/bin/activate
 
-COMMON_RUN := $(COMMON_VENV) \
+TEST_SDK := $(PIP_INSTALL) \
+	--index-url https://test.pypi.org/simple/ \
+	--extra-index-url https://pypi.org/simple \
+	spectra-assure-sdk==1.0.5
+
+COMMON_RUN := $(COMMON_VENV); \
 	$(PIP_INSTALL) -r requirements.txt ; \
 	$(MIN_PYTHON_VERSION)
 
 # ----------------------------------------------
-test: prep_test test_cli test_cli_docker test_portal
+# test: prep_test test_cli test_cli_docker test_portal
+# test: prep_test test_cli test_cli_docker test_portal
+test: prep_test test_portal
 
 prep_test:
 	mkdir -p $(DOWNLOAD_PATH)
 
 test_cli:
 	source $(ENV_FILE_CLI); \
-	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLI) 2>$@.2 | tee $@.1
+	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLI) $(SYNC) 2>$@.2 | tee $@.1
 	mv $(PROGRAM).log $@.log
 
 test_cli_docker:

@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 class MyArgs:  # pylint: disable=R0903; Too few public methods
-    def __init__(self, repo_list_may_be_empty: bool = False, no_portal_or_cli: bool = False) -> None:
+    def __init__(
+        self,
+        repo_list_may_be_empty: bool = False,
+        no_portal_or_cli: bool = False,
+    ) -> None:
         self.repo_list_may_be_empty = repo_list_may_be_empty
         self.prog = self._get_prog_name()
         self.parser = argparse.ArgumentParser(

@@ -79,17 +79,18 @@ It also allows users to prevent downloading artifacts that have the `fail` statu
 
 ## Requirements and dependencies
 
-- **A self-hosted Artifactory instance**. If you're not an experienced Artifactory user, we strongly recommend you [consult the official JFrog documentation](https://jfrog.com/help/r/jfrog-artifactory-documentation/jfrog-artifactory) for instructions.
+- **An Artifactory instance - either self-hosted or cloud-hosted**. If you're not an experienced Artifactory user, we strongly recommend you [consult the official JFrog documentation](https://jfrog.com/help/r/jfrog-artifactory-documentation/jfrog-artifactory) for instructions.
+
 
 - **An active, valid license for a Spectra Assure product.** You can use the Spectra Assure CLI, or the Spectra Assure Portal, or both products with this integration. For CLI workflows (with `rl-secure` or with the Docker image), we recommend getting the [site-wide deployment license](https://docs.secure.software/cli/licensing-guide). For Portal workflows, you need a [Personal Access Token](https://docs.secure.software/api/generate-api-token) for your Portal account.
 
 - Python (minimal version: 3.10, tested with 3.10 - 3.13)
 
-- [requests](https://pypi.org/project/requests/)
+- [requests](https://pypi.org/project/requests/) >=2.32.5
 
-- [python-dateutil](https://pypi.org/project/python-dateutil/)
+- [python-dateutil](https://pypi.org/project/python-dateutil/) >=2.9.0.post0
 
-- [spectra-assure-sdk](https://pypi.org/project/spectra-assure-sdk/) >=1.0.3
+- [spectra-assure-sdk](https://pypi.org/project/spectra-assure-sdk/) >=1.0.9
 
 
 ### Supported Artifactory repository types

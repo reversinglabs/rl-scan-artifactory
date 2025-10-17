@@ -13,7 +13,7 @@ PIP_INSTALL := pip3 \
 VENV := ./vtmp/
 export VENV
 
-ENV_FILE_PORTAL := ../.env_portal
+ENV_FILE_PORTAL := ~/.envfile_rl-scanner-cloud-my
 
 LOG_LEVEL := DEBUG
 # LOG_LEVEL := INFO
@@ -60,7 +60,7 @@ COMMON_RUN := $(COMMON_VENV) \
 	$(MIN_PYTHON_VERSION)
 
 # ----------------------------------------------
-clean_both: cleanup_portal_projects cleanup_artifactory_properties
+clean_both: cleanup_portal_projects # cleanup_artifactory_properties
 
 cleanup_portal_projects:
 	source $(ENV_FILE_PORTAL); \

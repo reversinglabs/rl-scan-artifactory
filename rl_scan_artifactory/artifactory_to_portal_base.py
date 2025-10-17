@@ -46,7 +46,7 @@ class ArtifactoryToPortalBase:
     @staticmethod
     def _get_path_in_dict_simple(
         path: str,
-        data: Dict[str, Any],
+        data: Any,
     ) -> Any:
         ppath = path.split(".")
         logger.debug("%s", ppath)

@@ -67,6 +67,8 @@ class ScanCliLocal(
 
         command = list(qcommand)
 
+        logger.debug("%s", command)
+
         return self._do_command(
             what=what,
             command=command,

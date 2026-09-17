@@ -1,10 +1,10 @@
 # rl-scan-artifactory [![RL Status Badge](https://secure.software/pypi/badge/rl-scan-artifactory)](https://secure.software/pypi/packages/rl-scan-artifactory)
 
 ReversingLabs provides the official Spectra Assure integration for [JFrog Artifactory](https://jfrog.com/artifactory/) to help software producers protect their organization, their development and build environments, and their customers by continuously monitoring and scanning software artifacts in Artifactory repositories.
-**Only self-hosted Artifactory instances are supported**.
 
 The integration is called `rl-scan-artifactory` and provided as a Python package that can be installed directly from PyPI.
-The integration's GitHub repository also contains a separate Artifactory plugin called `rlBlock` which can be used to prevent access to specific artifacts based on their scanning results from `rl-scan-artifactory`.
+Additionally, a separate Artifactory plugin called
+[`rlArtifactoryPlugin`](https://github.com/reversinglabs/rlArtifactoryPlugin) can be used to prevent access to specific artifacts based on scanning results from `rl-scan-artifactory`.
 
 The `rl-scan-artifactory` integration is most suitable for existing Spectra Assure users who want to protect their current or future Artifactory repositories in an automated, reliable way.
 
@@ -74,7 +74,7 @@ After the scan has finished, the integration applies [metadata properties](#arti
 
 For each artifact, the properties indicate that it has been scanned with Spectra Assure and record its overall scan status (`pass` or `fail`).
 This allows the integration to skip already scanned artifacts the next time it starts, and to scan only new artifacts in the repository.
-It also allows users to prevent downloading artifacts that have the `fail` status with the [rlBlock Artifactory plugin](#blocking-artifact-downloads).
+It also allows users to prevent downloading artifacts that have the `fail` status when using the [rlArtifactoryPlugin Artifactory plugin](#blocking-artifact-downloads).
 
 
 ## Requirements and dependencies
@@ -204,7 +204,7 @@ Depending on the product choice, some parameters may be ignored because they are
 | --portal, -P    | Use the Spectra Assure Portal for artifact scanning and generating analysis reports. **Mutually exclusive with --cli and --cli-docker**.  |
 | --cli-rlstore-path  | **Required when using --cli or --cli-docker**. Path to an existing [package store](https://docs.secure.software/cli/commands/init#package-store) that the integration can use. |
 | --cli-rlsecure-path | **Required when using --cli**. Path to the locally installed `rl-secure` executable. |
-| --sync, -S   | Enables reanalyzing previously scanned artifacts. If a package URL associated with an artifact already exists in the Portal or in the specified package store, this parameter instructs the integration to use the `sync` action instead of `scan`. **Not supported for --cli-docker**. <br />If using the rlBlock plugin, you won't be able to sync artifacts with status `fail` if you don't allow the server where `rl-scan-artifactory` is running from. Check the [plugin README](tools/rlBlock/README.md) for instructions. |
+| --sync, -S   | Enables reanalyzing previously scanned artifacts. If a package URL associated with an artifact already exists in the Portal or in the specified package store, this parameter instructs the integration to use the `sync` action instead of `scan`. **Not supported for --cli-docker**. <br />When using the rlArtifactoryPlugin plugin, you won't be able to sync artifacts with status `fail` if you don't allow the server where `rl-scan-artifactory` is running from. <br> See the [rlArtifactoryPlugin Artifactory plugin](#blocking-artifact-downloads) for further instructions. |
 | --pack-safe | Include the [RL-SAFE archive](https://docs.secure.software/concepts/analysis-reports#rl-safe-archive) in the compressed file with analysis reports. **Incompatible with --portal** |
 | --cli-reports-repo  | Compatibility parameter for storing reports in remote repositories. By default, Artifactory repositories of type `remote` cannot be used to store reports. The integration needs a custom `local` `generic` repository to store the reports (e.g `Spectra-Assure-Reports`), and it should be specified with this parameter. If not specified, all `remote` repositories will be skipped. |
 | --download, -d   | Path to an existing directory that the integration can use for temporary artifact downloads from Artifactory. If not specified, Python `tempfile.gettempdir()` will be used. |
@@ -241,8 +241,8 @@ When Docker images are uploaded to Artifactory, they typically come with `manife
 However, the file path to `manifest.json` may not have a version.
 In that case, the integration will try to extract a version from the `config` or an associated `list.manifest.json`.
 
-### Compatibility with rlBlock
-In order for the `rlBlock` plugin to work properly,
+### Compatibility with the `rlArtifactoryPlugin` plugin
+In order for the `rlArtifactoryPlugin` plugin to work properly,
 Artifactory properties are set recursively on the directory containing the `manifest.json` file and all files under it.
 
 
@@ -307,16 +307,19 @@ Because generic items without a proper package URL cannot be reanalyzed, the `sy
 
 ## Blocking artifact downloads
 
-Optionally, an Artifactory plugin called `rlBlock` can be used together with the `rl-scan-artifactory` integration to prevent download requests for artifacts that received the `fail` status after analysis.
+Optionally, an Artifactory plugin called `rlArtifactoryPlugin`
+can be installed on the Artifactory host to work together with the `rl-scan-artifactory` integration to prevent downloads for artifacts that received the `fail` status after analysis.
 
 Download blocking must be enabled in the plugin's `.properties` file.
-If enabled, the plugin checks the artifact properties whenever a download request is received by Artifactory.
-If a Spectra Assure scan status property exists for an artifact and its value is "fail", the plugin immediately returns HTTP 403 and a JSON body with a message stating that the download was blocked due to a failing ReversingLabs Spectra Assure scan.
+When enabled, the plugin checks the artifact properties whenever a download request is received by Artifactory.
+If a Spectra Assure scan status property exists for an artifact and its value is "fail",
+the plugin immediately returns HTTP 403 and a JSON body with a message
+stating that the download was blocked due to a failing ReversingLabs Spectra Assure scan.
 If the property doesn't exist for an artifact or its value is "pass", the plugin allows the download to continue as normal.
 
-To use the plugin, download it directly from the `rl-scan-artifactory` GitHub repository.
-Find more detailed configuration instructions in the [plugin README](tools/rlBlock/README.md).
-
+To use the plugin,
+see the instructions in the
+[rlArtifactoryPlugin](https://github.com/reversinglabs/rlArtifactoryPlugin) GitHub repository.
 
 ## Useful resources
 

@@ -65,7 +65,7 @@ cleanupVenv:
 # ======================================
 # prep the code with format, lint typing
 
-prep: black pylama mypy verify_vertical_def
+prep: black pylama mypy
 	mkdir -p tmp $(DOWNLOAD_PATH)
 	ls -l
 
@@ -92,12 +92,6 @@ mypy:
 		--strict \
 		--no-incremental \
 		$(PY_FILES)
-
-# verify we use vertical defs def xxx(self,) -> ...:
-# that get formatted vertical by black
-verify_vertical_def:
-	grep '(self)' $(PY_FILES) || exit 0
-	grep '(self,' $(PY_FILES) || exit 0
 
 full_test: clean_both all testpypi
 

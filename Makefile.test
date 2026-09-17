@@ -33,10 +33,7 @@ export LOG_LEVEL
 # ----------------------------------------------
 REPOS_DEBIAN := ubuntu
 REPOS_DOCKER := docker,docker-local
-
 REPOS_GENERIC := my-generic-local,my-release-candidates
-# REPOS_GENERIC := my-generic-local
-
 REPOS_MVN := maven2-dev,maven2-local-dev
 REPOS_NPM := nmpjs.org,npm-local
 REPOS_NUGET := noget-dev-remote-mboot
@@ -59,11 +56,7 @@ REPO_LIST_FULL := \
 	$(REPO_LIST_DEFAULT)
 
 REPO_LIST := $(REPO_LIST_FULL)
-# REPO_LIST := --repo docker-local
 REPO_LIST := --repo $(REPOS_GENERIC)
-
-# Cloud in aws
-REPO_LIST := --repo local-generic-mboot
 
 # ----------------------------------------------
 SYNC :=  --sync --ignore-artifactory-properties
@@ -113,7 +106,7 @@ COMMON_RUN := $(COMMON_VENV); \
 
 # ----------------------------------------------
 # test: prep_test test_cli # test_cli_docker test_portal
-test: prep_test test_cloud
+test: prep_test test_portal
 
 prep_test:
 	mkdir -p $(DOWNLOAD_PATH)
@@ -133,7 +126,7 @@ test_portal:
 	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_PORTAL) 2>$@.2 | tee $@.1
 	mv $(PROGRAM).log $@.log
 
-test_cloud:
+test_cloud: # aws cloud instance
 	source $(ENV_FILE_CLOUD); \
 	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLOUD) 2>$@.2 | tee $@.1
 	mv $(PROGRAM).log $@.log

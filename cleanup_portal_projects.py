@@ -9,7 +9,6 @@ from rl_scan_artifactory import (
 from rl_scan_artifactory.with_cleanup_porta import WithCleanupPortal
 from rl_scan_artifactory.spectra_assure_api import SpectraAssureApi
 
-
 logger = logging.getLogger(__name__)
 
 

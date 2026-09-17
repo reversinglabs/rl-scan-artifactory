@@ -3,7 +3,6 @@ from .artifactory_file_processor_default import ArtifactoryFileProcessorDefault 
 from .artifactory_file_processor_docker import ArtifactoryFileProcessorDocker as ArtifactoryFileProcessorDocker
 from .artifactory_file_processor_generic import ArtifactoryFileProcessorGeneric as ArtifactoryFileProcessorGeneric
 
-
 __all__ = [
     "ArtifactoryFileProcessorCommon",
     "ArtifactoryFileProcessorDefault",

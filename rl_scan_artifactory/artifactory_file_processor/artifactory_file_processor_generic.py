@@ -303,7 +303,7 @@ class ArtifactoryFileProcessorGeneric(
             sha256=sha256,
         )
         if download_path is None:
-            # if we block `rlBlock plugin`,  we get no download dir
+            # if we block with `rlArtifactoryPlugin`,  we get no download dir
             self.processing_info.completed = True
             self.processing_info.status = PROCESS_FILE_SKIP
             self.processing_info.reason = "skip: file cannot be downloaded"

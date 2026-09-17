@@ -15,7 +15,6 @@ from .constants import (
     DEFAULT_DIGEST_TYPE,
 )
 
-
 logger = logging.getLogger(__name__)
 
 

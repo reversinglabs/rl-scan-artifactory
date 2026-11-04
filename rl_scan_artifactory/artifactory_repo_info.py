@@ -4,9 +4,6 @@ from dataclasses import (
     dataclass,
     field,
 )
-from typing import (
-    List,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +14,7 @@ class ArtifactoryRepoInfo:
     repo_type: str
     package_type: str
     layout: str
-    environments: List[str] = field(default_factory=list)
+    environments: list[str] = field(default_factory=list)
 
     def __str__(
         self,
@@ -29,5 +26,5 @@ class ArtifactoryRepoInfo:
                 f"package_type: {self.package_type}",
                 f"layout: {self.layout}",
                 f"environments: {self.environments}",
-            ]
+            ],
         )

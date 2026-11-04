@@ -1,11 +1,10 @@
 # python3 ts=4space
 import logging
 from typing import (
-    Dict,
     Any,
 )
 
-from ..fileinfo import FileInfo
+from rl_scan_artifactory.fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ e.g.
     The architecture is not in the manifest.json. but in the build layer or in the list.manifest.json (if it exists).
     Image layer files may actually not even be downloadable if they are .marker (dedup),
       they may be located elsewhere as they are shared between images,
-      or in worst case may not be downloadable at all if a image was deleted that has the ream layer.
+      or in worst case may not be downloadable at all if a image was deleted that has the real layer.
       (possibly via the storage layer it may be downloadable)
 
 Some package format have a different name on the repo level then the file extension:
@@ -44,25 +43,23 @@ note:
 
 
 class SimpleDataCommon:
-    change_package_type_to_property = {
-        "debian": "deb",
-        "gems": "gem",
-    }
-
-    what = {
-        ".id": "name",  # nuget
-        ".name": "name",
-        ".version": "version",
-        ".arch": "arch",  # rpm
-        ".release": "release",  # rpm
-        ".namespace": "namespace",  # maven
-    }
-
     def __init__(
         self,
         file: FileInfo,
     ) -> None:
-        self.simple_data: Dict[str, Any] = {}
+        self.change_package_type_to_property: dict[str, str] = {
+            "debian": "deb",
+            "gems": "gem",
+        }
+        self.what: dict[str, str] = {
+            ".id": "name",  # nuget
+            ".name": "name",
+            ".version": "version",
+            ".arch": "arch",  # rpm
+            ".release": "release",  # rpm
+            ".namespace": "namespace",  # maven
+        }
+        self.simple_data: dict[str, Any] = {}
 
         self.file = file
         self.uri: str = file.uri
@@ -75,10 +72,11 @@ class SimpleDataCommon:
         self,
         p_type: str,
     ) -> str:
-        """some repository items have a different name for the property first part
+        """
+        Some repository items have a different name for the property first part
+
         change the package_type to the proper first part used in properties
         """
-
         if p_type in self.change_package_type_to_property:
             return self.change_package_type_to_property[p_type]
 
@@ -86,11 +84,12 @@ class SimpleDataCommon:
 
     def _make_simple_data_from_props_artifactory_basic(
         self,
-    ) -> Dict[str, Any]:
-        """we are looking for properties that start with p_type and end with <what>
+    ) -> dict[str, Any]:
+        """
+        We are looking for properties that start with p_type and end with <what>
+
         basically we are looking for name and version but take some other ones along the way
         """
-
         logger.debug(
             "repo: %s, uri: %s, props: %s",
             self.file.repo.name,
@@ -110,6 +109,6 @@ class SimpleDataCommon:
 
     def make_simple_data(
         self,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         logger.debug("repository type: %s, file: %s", self.p_type, self.uri)
         return self._make_simple_data_from_props_artifactory_basic()

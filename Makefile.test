@@ -2,28 +2,13 @@
 SHELL := /bin/bash
 export SHELL
 
-MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | awk '{print $0; exit}' ) )
-export MIN_PYTHON_VERSION
-
-PIP_INSTALL := pip3 \
-	--require-virtualenv \
-	--disable-pip-version-check \
-	--no-color install --no-cache-dir
-
-VENV := ./vtmp/
-export VENV
+include Makefile.common
 
 PROGRAM := rl-scan-artifactory-dev
 
-# change the portal env file content to test different endpoints
-ENV_FILE_PORTAL := ~/.env_portal
-ENV_FILE_CLI := ~/.env_cli
-ENV_FILE_CLOUD := ~/.env_cloud
-
-DOWNLOAD_PATH := ./tmp2
-export DOWNLOAD_PATH
-
-WITH_TEST_LIMIT_REPO_TO := 2
+# if set (int) limits the test scan to N items in the repo
+# set to 0 to switch off
+WITH_TEST_LIMIT_REPO_TO := 10
 export WITH_TEST_LIMIT_REPO_TO
 
 # ----------------------------------------------
@@ -31,39 +16,16 @@ LOG_LEVEL := DEBUG
 export LOG_LEVEL
 
 # ----------------------------------------------
-REPOS_DEBIAN := ubuntu
-REPOS_DOCKER := docker,docker-local
-REPOS_GENERIC := my-generic-local,my-release-candidates
-REPOS_MVN := maven2-dev,maven2-local-dev
-REPOS_NPM := nmpjs.org,npm-local
-REPOS_NUGET := noget-dev-remote-mboot
-REPOS_PYPI := pypi
-REPOS_RPM := mboot-dev-fedora_epel-remote,mboot-dev-rockylinux-remote
-REPOS_RUBY := rubygems-1
-
-REPO_LIST_DEFAULT := \
-	--repo $(REPOS_MVN) \
-	--repo $(REPOS_NPM) \
-	--repo $(REPOS_NUGET) \
-	--repo $(REPOS_PYPI) \
-	--repo $(REPOS_RPM) \
-	--repo $(REPOS_RUBY) \
-	--repo $(REPOS_DEBIAN)
-
-REPO_LIST_FULL := \
-	--repo  $(REPOS_DOCKER) \
-	--repo $(REPOS_GENERIC) \
-	$(REPO_LIST_DEFAULT)
-
 REPO_LIST := $(REPO_LIST_FULL)
-REPO_LIST := --repo $(REPOS_GENERIC)
+# REPO_LIST := --repo $(REPOS_GENERIC)
 
 # ----------------------------------------------
-SYNC :=  --sync --ignore-artifactory-properties
+# --ignore-artifactory-properties
+SYNC :=
+# --sync
 
 OPTIONS_TEST_COMMON := \
-	--ignore-artifactory-properties \
-	--verbose \
+	--verbose --log-to-stderr \
 	--pack-safe \
 	--ignore-cert-errors \
 	--download=$(DOWNLOAD_PATH) \
@@ -72,41 +34,24 @@ OPTIONS_TEST_COMMON := \
 # rl-store may not exist on test machines
 #	--cli-reports-repo="Spectra-Assure-Reports"
 CLI_COMMON := \
+	--cli-reports-repo="Spectra-Assure-Reports" \
 	--cli-rlstore-path=$$HOME/tmp/rl-secure \
 	--cli-report-types=all
 
 CLI_OPTIONS := --cli $(CLI_COMMON) \
 	--cli-rlsecure-path=$$HOME/tmp/rl-secure
 
-# cli-docker currenty as no sync possibility (fail on --sync)
-CLI_DOCKER_OPTIONS := --cli-docker 	$(CLI_COMMON) \
+# cli-docker currently as no sync possibility (fail on --sync)
+CLI_DOCKER_OPTIONS := --cli-docker 	$(CLI_COMMON)
 
-OPTIONS_TEST_CLI := $(OPTIONS_TEST_COMMON) $(CLI_OPTIONS)
-
-OPTIONS_TEST_CLI_DOCKER := $(OPTIONS_TEST_COMMON) $(CLI_DOCKER_OPTIONS)
-
-OPTIONS_TEST_PORTAL := $(OPTIONS_TEST_COMMON) --portal --sync
-
-OPTIONS_TEST_CLOUD := $(OPTIONS_TEST_COMMON) $(CLI_OPTIONS) --cli-reports-repo="Spectra-Assure-Reports"
+OPTIONS_TEST_CLI := $(OPTIONS_TEST_COMMON) 				$(CLI_OPTIONS)
+OPTIONS_TEST_CLI_DOCKER := $(OPTIONS_TEST_COMMON) 		$(CLI_DOCKER_OPTIONS)
+OPTIONS_TEST_PORTAL := $(OPTIONS_TEST_COMMON) 			--portal
+OPTIONS_TEST_CLOUD := $(OPTIONS_TEST_COMMON) 			$(CLI_OPTIONS)
 
 # ----------------------------------------------
-COMMON_VENV := rm -rf $(VENV); \
-	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
-	source ./$(VENV)/bin/activate
-
-# seems not used (this ist only used with test-pypi)
-TEST_SDK := $(PIP_INSTALL) \
-	--index-url https://test.pypi.org/simple/ \
-	--extra-index-url https://pypi.org/simple \
-	spectra-assure-sdk==1.0.9
-
-COMMON_RUN := $(COMMON_VENV); \
-	$(PIP_INSTALL) -r requirements.txt ; \
-	$(MIN_PYTHON_VERSION)
-
-# ----------------------------------------------
-# test: prep_test test_cli # test_cli_docker test_portal
-test: prep_test test_portal
+# test: prep_test test_portal test_cli_docker
+test: prep_test test_cli test_portal test_cli_docker
 
 prep_test:
 	mkdir -p $(DOWNLOAD_PATH)
@@ -123,10 +68,11 @@ test_cli_docker:
 
 test_portal:
 	source $(ENV_FILE_PORTAL); \
-	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_PORTAL) 2>$@.2 | tee $@.1
+	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_PORTAL) $(SYNC) 2>$@.2 | tee $@.1
 	mv $(PROGRAM).log $@.log
+	grep -v INFO $@.log
 
-test_cloud: # aws cloud instance
+test_cloud:
 	source $(ENV_FILE_CLOUD); \
-	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLOUD) 2>$@.2 | tee $@.1
+	$(COMMON_RUN) $(PROGRAM).py $(OPTIONS_TEST_CLOUD) $(SYNC) 2>$@.2 | tee $@.1
 	mv $(PROGRAM).log $@.log

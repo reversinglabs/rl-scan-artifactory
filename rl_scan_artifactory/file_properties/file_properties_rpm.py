@@ -1,24 +1,22 @@
 # python3 ts=4space
 
+import logging
 from typing import (
-    Dict,
     Any,
 )
 
-
-import logging
+from ..artifactory_api import ArtifactoryApi
+from ..fileinfo import FileInfo
 
 # from .simple_data import SimpleData
 from .file_properties_common import FilePropertiesCommon
-from ..artifactory_api import ArtifactoryApi
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
 We are hunting for properties so that we can build a package url.
 
-- name                # allways
+- name                # always
 - version             # allwyas
 - arch (artictecture) # optional
 - namespace           # optional
@@ -56,7 +54,7 @@ class FilePropertiesRpm(
 ):
     def __init__(
         self,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         file: FileInfo,
         artifactory_api: ArtifactoryApi,
     ) -> None:
@@ -95,7 +93,7 @@ class FilePropertiesRpm(
         logger.debug("after touch rpm info; properties are now: %s", str(self.props))
         self.file.properties = self.props
 
-    def skip_non_candidate_file(
+    def _skip_non_candidate_file(
         self,
     ) -> bool:
         return self._common_filter_on_item_properties()

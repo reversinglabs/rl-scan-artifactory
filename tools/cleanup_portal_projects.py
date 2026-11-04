@@ -6,9 +6,8 @@ import logging
 from rl_scan_artifactory import (
     MyArgs,
 )
-from rl_scan_artifactory.with_cleanup_porta import WithCleanupPortal
 from rl_scan_artifactory.spectra_assure_api import SpectraAssureApi
-
+from rl_scan_artifactory.with_cleanup_porta import WithCleanupPortal
 
 logger = logging.getLogger(__name__)
 

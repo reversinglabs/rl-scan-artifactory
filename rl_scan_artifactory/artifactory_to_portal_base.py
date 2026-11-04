@@ -2,11 +2,12 @@
 import logging
 from typing import (
     Any,
-    Dict,
-    Tuple,
 )
 
 from .artifactory_api import ArtifactoryApi
+from .exceptions import (
+    SpectraAssureInvalidAction,
+)
 from .spectra_assure_api import SpectraAssureApi
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class ArtifactoryToPortalBase:
     def __init__(
         self,
         *,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
     ) -> None:
@@ -27,16 +28,18 @@ class ArtifactoryToPortalBase:
         self.verbose = self.cli_args.get("verbose", False)
         self.download_dir = self.cli_args.get("download", "/tmp")
 
-        self.not_finished: Dict[str, Any] = {}
+        self.not_finished: dict[str, Any] = {}
 
     @staticmethod
     def _purl_split(
         purl: str,
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         if "@" not in purl:
-            raise Exception("package url is missing '@'")
+            msg = f"package url is missing '@': {purl}"
+            raise SpectraAssureInvalidAction(msg)
         if "/" not in purl:
-            raise Exception("package url is missing '/'")
+            msg = f"package url is missing '/': {purl}"
+            raise SpectraAssureInvalidAction(msg)
 
         aa = purl.split("@")
         bb = aa[0].split("/")

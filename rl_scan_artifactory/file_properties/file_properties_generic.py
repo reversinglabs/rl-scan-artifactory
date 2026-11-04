@@ -1,26 +1,26 @@
 # python3 ts=4space
 
+import logging
 from typing import (
-    Dict,
     Any,
 )
-import logging
 
-# from .simple_data import SimpleData
-from .file_properties_common import FilePropertiesCommon
 from ..artifactory_api import ArtifactoryApi
-from ..fileinfo import FileInfo
 from ..constants import (
     META_STRING,
 )
+from ..fileinfo import FileInfo
+
+# from .simple_data import SimpleData
+from .file_properties_common import FilePropertiesCommon
 
 logger = logging.getLogger(__name__)
 
 """
 We are hunting for properties so that we can build a package url.
 
-- name                # allways
-- version             # allways
+- name                # always
+- version             # always
 - arch (architecture) # optional
 - namespace           # optional
 
@@ -60,7 +60,7 @@ class FilePropertiesGeneric(
 
     def __init__(
         self,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         file: FileInfo,
         artifactory_api: ArtifactoryApi,
     ) -> None:
@@ -75,27 +75,28 @@ class FilePropertiesGeneric(
     def _get_properties(
         self,
     ) -> None:
-        if self.cli_args.get("portal"):
-            if not self.uri.lower().endswith(self.k):
-                self.file.properties = self.props
-                return
+        if self.cli_args.get("portal") and not self.uri.lower().endswith(self.k):
+            self.file.properties = self.props
+            return
 
         logger.debug("investigate properties uri: %s", self.uri)
         self.props = self.artifactory_api.get_item_properties(
             file=self.file,
         )
 
-        name = ""
-        version = ""
-
-        front = f"{self.what}._derived_"
-        self.props[f"{front}.name"] = [f"{name}"]
-        self.props[f"{front}.version"] = [f"{version}"]
+        # Nothing is derived from the uri here: a generic repository has no layout
+        # to derive from. The name and version of a generic artifact come from its
+        # .rl_meta side-car (see ArtifactoryFileProcessorGeneric), which is read in
+        # a separate pass and does not go through this class.
+        #
+        # Whatever generic.name / generic.version the repository itself carries is
+        # therefore left alone; writing empty derived values here used to overwrite
+        # them, which made the repository's own properties unusable.
 
         logger.debug("properties are now: %s", str(self.props))
         self.file.properties = self.props
 
-    def skip_non_candidate_file(
+    def _skip_non_candidate_file(
         self,
     ) -> bool:
         """
@@ -103,14 +104,16 @@ class FilePropertiesGeneric(
 
         in portal mode
             we only look at rl_meta files and process via the meta file
-            we skip therfore all non meta files
+            we skip therefore all non meta files
 
         in cli mode we process
         """
-        if self.cli_args.get("portal"):
-            if not self.uri.endswith(self.k):
-                logger.debug("SKIP: %s not a '%s' file: %s", self.p_type, self.k, self.uri)
-                self.file.simple = {}
-                return True
+        if self.cli_args.get("portal") and not self.uri.endswith(self.k):
+            logger.debug("SKIP: %s not a '%s' file: %s", self.p_type, self.k, self.uri)
+            self.file.simple = {}
+            return True
 
-        return self._common_filter_on_item_properties()  # returns False , we do not skip
+        # generic never skips on name/version: its purl comes from the rl_meta side-car,
+        # not from the item properties, so R4.2 does not apply here
+        self._populate_simple_data()
+        return False

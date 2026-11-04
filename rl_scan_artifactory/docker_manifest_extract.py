@@ -1,10 +1,14 @@
 # python3 ts=4space
 import json
 import logging
+import pathlib
 from typing import (
-    Dict,
-    List,
     Any,
+)
+
+from .exceptions import (
+    SpectraAssureInvalidAction,
+    SpectraAssureInvariantError,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,16 +26,13 @@ read, parse and extract relevant info from:
 
 
 class DockerManifestExtract:
-    known_mediatypes: List[str] = [  # top level mediatypes
+    known_mediatypes: list[str] = [  # top level mediatypes
         r"application\/vnd.oci.image.index.v1+json",
         "application/vnd.oci.image.index.v1+json",
-        #
         r"application\/vnd.oci.image.manifest.v1+json",
         "application/vnd.oci.image.manifest.v1+json",
-        #
         r"application\/vnd.docker.distribution.manifest.list.v2+json",
         "application/vnd.docker.distribution.manifest.list.v2+json",
-        #
         r"application\/vnd.docker.distribution.manifest.v2+json",
         "application/vnd.docker.distribution.manifest.v2+json",
     ]
@@ -41,15 +42,15 @@ class DockerManifestExtract:
         file_path: str,
     ) -> None:
         self.mt = None
-        self.data: Dict[str, Any] = {}
-        self.output: Dict[str, str] = {}
+        self.data: dict[str, Any] = {}
+        self.output: dict[str, str] = {}
         self.manifest_type: str | None = None
         self.file_path = file_path
 
-        self.config: Dict[str, Any] = {}  # manifest.json; node
-        self.layers: List[Dict[str, Any]] = []  # manifest.json; node
-        self.manifests: List[Dict[str, Any]] = []  # list.manifest.json; tree/list
-        self.annotations: Dict[str, Any] = {}
+        self.config: dict[str, Any] = {}  # manifest.json; node
+        self.layers: list[dict[str, Any]] = []  # manifest.json; node
+        self.manifests: list[dict[str, Any]] = []  # list.manifest.json; tree/list
+        self.annotations: dict[str, Any] = {}
 
         self.validate_file_name()
         self.read_file_json()
@@ -79,17 +80,28 @@ class DockerManifestExtract:
                 self.manifest_type = what
                 return
 
-        raise Exception(f"unknown manifest file, expecting one of {valid.keys()}")
+        raise SpectraAssureInvalidAction(f"unknown manifest file, expecting one of {valid.keys()}")
 
     def read_file_json(
         self,
     ) -> None:
+        """Read the manifest, or fail saying so.
+
+        Swallowing the read error here made the next step report a missing
+        'schemaVersion', which points at the content of a file we never read.
+        """
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with pathlib.Path(self.file_path).open("r", encoding="utf-8") as f:
                 self.data = json.load(f)
-        except Exception as e:
-            logger.exception("cannot load json file: '%s'; %s", self.file_path, e)
-            return
+        except (OSError, ValueError) as e:  # ValueError covers json.JSONDecodeError
+            msg = f"cannot read '{self.file_path}' as json: {type(e).__name__}: {e}"
+            logger.error(msg)
+            raise SpectraAssureInvalidAction(msg) from e
+
+        if not isinstance(self.data, dict):
+            msg = f"'{self.file_path}' is not a json object but a {type(self.data).__name__}"
+            logger.error(msg)
+            raise SpectraAssureInvalidAction(msg)
 
         logger.debug("json data: %s", self.data)
 
@@ -99,8 +111,10 @@ class DockerManifestExtract:
         k = "schemaVersion"
         sv = self.data.get(k, None)
         if sv is None:
-            raise Exception(f"missing '{k}' json: {self.file_path}")
-        assert sv == 2
+            raise SpectraAssureInvalidAction(f"missing '{k}' json: {self.file_path}")
+        if sv != 2:
+            msg = "expected sv == 2"
+            raise SpectraAssureInvariantError(msg)
 
     def check_mediatype(
         self,
@@ -108,19 +122,16 @@ class DockerManifestExtract:
         k = "mediaType"
         self.mt = self.data.get(k, None)
         if self.mt is None:
-            raise Exception(f"missing '{k}' json: {self.file_path} {self.data}")
+            raise SpectraAssureInvalidAction(f"missing '{k}' json: {self.file_path} {self.data}")
 
         logger.debug("%s: %s", self.mt, self.known_mediatypes)
-        assert self.mt in self.known_mediatypes
-
-    @staticmethod
-    def get_tree_items() -> Dict[str, Any]:
-        rr: Dict[str, Any] = {}
-        return rr
+        if self.mt not in self.known_mediatypes:
+            msg = "expected self.mt in self.known_mediatypes"
+            raise SpectraAssureInvariantError(msg)
 
     def _get_node_config(
         self,
-        rr: Dict[str, Any],
+        rr: dict[str, Any],
     ) -> None:
         logger.debug("before: %s", rr)
 
@@ -134,7 +145,7 @@ class DockerManifestExtract:
 
     def _get_node_layers(
         self,
-        rr: Dict[str, Any],
+        rr: dict[str, Any],
     ) -> None:
         logger.debug("before: %s", rr)
 
@@ -149,8 +160,8 @@ class DockerManifestExtract:
 
     def _get_node_items(
         self,
-    ) -> Dict[str, Any]:
-        rr: Dict[str, Any] = {}
+    ) -> dict[str, Any]:
+        rr: dict[str, Any] = {}
         logger.debug("before: %s", rr)
 
         self._get_node_config(rr)
@@ -161,18 +172,18 @@ class DockerManifestExtract:
 
     def get_items(
         self,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if self.manifest_type == "tree":
-            return self.get_tree_items()
+            return {}  # known dead code for now we do  not scan tree's
 
         if self.manifest_type == "node":
             return self._get_node_items()
 
-        raise Exception("unknown manifest_type: not supported: {self.manifest_type}")
+        raise SpectraAssureInvalidAction(f"unknown manifest_type: not supported: {self.manifest_type}")
 
     def set_output(
         self,
-        output: Dict[str, str],
+        output: dict[str, str],
     ) -> None:
         self.output = output
 

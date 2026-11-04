@@ -2,10 +2,6 @@
 import logging
 import os
 
-from typing import (
-    List,
-)
-
 from .spectra_assure_api import SpectraAssureApi
 
 logger = logging.getLogger(__name__)
@@ -15,7 +11,7 @@ class WithCleanupPortal:
     @staticmethod
     def cleanup_test_portal(
         spectra_assure_api: SpectraAssureApi,
-        repo_list: List[str] | None = None,
+        repo_list: list[str] | None = None,
     ) -> None:
         if repo_list is None:
             repo_list = []
@@ -26,7 +22,7 @@ class WithCleanupPortal:
         data = response.json()
 
         for what in ["WITH_TEST_CLEANUP_MY_PROJECTS", "WITH_TEST_CLEANUP_ALL_PROJECTS"]:
-            z = bool(int(os.getenv(what, 0)))
+            z = bool(int(os.getenv(what, "0")))
             logger.debug("%s: %s", what, z)
             if z is False:
                 continue

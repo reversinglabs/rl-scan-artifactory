@@ -2,8 +2,6 @@
 import logging
 from typing import (
     Any,
-    Dict,
-    List,
 )
 
 from .artifactory_api import ArtifactoryApi
@@ -23,7 +21,7 @@ class ArtifactoryRepoProcessor(
     def __init__(
         self,
         *,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo_name: str,
@@ -37,6 +35,9 @@ class ArtifactoryRepoProcessor(
             repo_name=repo_name,
         )
         self.p_type = self.repo.package_type.lower()
+        # every file the listing holds, not only the interesting ones: a generic
+        # side-car needs the hash of the file it describes (R10.7.4)
+        self.sha2_by_uri: dict[str, str] = {}
 
     def _make_repo_info(
         self,
@@ -58,23 +59,24 @@ class ArtifactoryRepoProcessor(
 
     def extract_my_interesting_files(
         self,
-        one_repo_list: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        my_interesting_files: List[Dict[str, Any]] = []
+        one_repo_list: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        my_interesting_files: list[dict[str, Any]] = []
 
         for item in one_repo_list.get("files", []):
+            if item.get("uri") and item.get("sha2"):
+                self.sha2_by_uri[item["uri"]] = item["sha2"]
+
             if not (self.p_type == "generic" and self.cli_args.get("cli")):
                 # only ends with (if defined)
                 ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("endswith", "")
-                if len(ew) > 0:
-                    if not item.get("uri", "").endswith(ew):
-                        continue
+                if len(ew) > 0 and not item.get("uri", "").endswith(ew):
+                    continue
 
                 # skip specific items not endswith (if defined)
                 not_ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("not_endswith", "")
-                if len(not_ew) > 0:
-                    if item.get("uri", "").endswith(not_ew):
-                        continue
+                if len(not_ew) > 0 and item.get("uri", "").endswith(not_ew):
+                    continue
 
             logger.debug("append %s", item)
             my_interesting_files.append(item)
@@ -84,11 +86,11 @@ class ArtifactoryRepoProcessor(
     def _make_file_list_one_repo(
         self,
         repo: ArtifactoryRepoInfo,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         if self.p_type not in ARTIFACTORY_KNOWN_PACKAGE_TYPES:
             return []
 
-        qp: Dict[str, Any] = {
+        qp: dict[str, Any] = {
             "deep": 1,
             "mdTimestamps": 0,
             "listFolders": 0,
@@ -108,14 +110,9 @@ class ArtifactoryRepoProcessor(
     ) -> ArtifactoryRepoInfo:
         return self.repo
 
-    def get_ptype(
-        self,
-    ) -> str:
-        return self.p_type
-
     def process(
         self,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         return self._make_file_list_one_repo(
             repo=self.repo,
         )

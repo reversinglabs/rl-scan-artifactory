@@ -9,11 +9,11 @@ export VENV="venv-rl-scan-artifactory"
 # Temporary download location for artifacts
 export DOWNLOAD_PATH="./download_temp" # a temp download location
 
-# Requires python3 >= 3.10
-export PYTHON_VERSION="python3.10"
+# Requires python3 >= 3.11
+export PYTHON_VERSION="python3.11"
 
 # We write a log file in the directory where you start rl-scan-artifactory
-export LOG_LEVEL="INFO" # one of [ERROR, WARNING, INFO, DEBUG]: default WARNING
+export LOG_LEVEL="INFO" # one of [DEBUG, INFO, WARNING, ERROR, CRITICAL]: default WARNING
 
 # Artifactory: all 3 are required
 export ARTIFACTORY_HOST="your artifactory host fqdn without https://"
@@ -24,10 +24,11 @@ export ARTIFACTORY_TOKEN="your artifactory token"
 export PROXY_SERVER="" # your proxy server
 export PROXY_PORT="" # if a host is specified, you also must set a port
 export PROXY_USER="" # your proxy username
-export PROXY_PASS="" # if a username is specified, you will most likely need to set a password
+export PROXY_PASSWORD="" # a proxy user and a proxy password go together: either both or neither
 
-# If using Spectra Assure Portal: all 4 are required
+# If using Spectra Assure Portal: ORG, GROUP and ACCESS_TOKEN are required, and SERVER, HOST or both
 export RLPORTAL_SERVER="Name of your Spectra Assure Portal instance"
+export RLPORTAL_HOST="" # optional: only if ReversingLabs gave you a host other than my.secure.software
 export RLPORTAL_ORG="Spectra Assure Portal organization your account belongs to"
 export RLPORTAL_GROUP="Spectra Assure Portal group your account is a member of"
 export RLPORTAL_ACCESS_TOKEN="Personal access token for your Spectra Assure Portal account"
@@ -82,7 +83,7 @@ scan_with_portal()
     # To use Spectra Assure Portal for scanning, you need to specify -P or --portal.
 
     # Artifacts will be temporarily downloaded into this directory and automatically removed after scanning.
-    # The specified download directory must already exist for the script get_files_artifactory.py to work.
+    # The download directory must already exist: rl-scan-artifactory does not create it.
     mkdir -p "${DOWNLOAD_PATH}"
 
     # --pack-safe will be silently ignored as it is irrelevant to the Portal

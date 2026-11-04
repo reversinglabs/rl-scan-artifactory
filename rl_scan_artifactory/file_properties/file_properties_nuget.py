@@ -1,25 +1,23 @@
 # python3 ts=4space
 
+import logging
 from typing import (
-    Dict,
     Any,
 )
 
-
-import logging
+from ..artifactory_api import ArtifactoryApi
+from ..fileinfo import FileInfo
 
 # from .simple_data import SimpleData
 from .file_properties_common import FilePropertiesCommon
-from ..artifactory_api import ArtifactoryApi
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
 We are hunting for properties so that we can build a package url.
 
-- name                # allways
-- version             # allways
+- name                # always
+- version             # always
 - arch (architecture) # optional
 - namespace           # optional
 
@@ -56,7 +54,7 @@ class FilePropertiesNuget(
 ):
     def __init__(
         self,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         file: FileInfo,
         artifactory_api: ArtifactoryApi,
     ) -> None:
@@ -73,7 +71,7 @@ class FilePropertiesNuget(
     ) -> None:
         self._get_common_properties()
 
-    def skip_non_candidate_file(
+    def _skip_non_candidate_file(
         self,
     ) -> bool:
         k = "nupkg"

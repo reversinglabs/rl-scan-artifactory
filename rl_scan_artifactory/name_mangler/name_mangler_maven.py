@@ -2,21 +2,22 @@
 
 import logging
 
+from rl_scan_artifactory.fileinfo import FileInfo
+
 from .name_mangler_common import NameManglerCommon
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
-docker.manifest: not consistent, somtimes a sha256 sometimes the version
+docker.manifest: not consistent, sometimes a sha256 sometimes the version
 docker.repoName: reversinglabs/rl-scanner
 
-Artifactory repo items have a name and version property (often but not allways).
+Artifactory repo items have a name and version property (often but not always).
 But may not have other info to make a unique purl. (e.g. for docker the arch is in the json
 
 Particularly:
 the same version may exists for different artchitectures
-and different build enviroments (pypi)
+and different build environments (pypi)
 
 We have the file path (the uri) on artifactory
 We may have a name and version property (not for docker so far: mboot:sept 2024)

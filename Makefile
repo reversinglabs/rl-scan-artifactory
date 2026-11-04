@@ -4,58 +4,53 @@
 SHELL := /bin/bash
 export SHELL
 
-VENV := ./vtmp/
+# the lowest installed python3.NN that is at least 3.11 (requires-python); tested on 3.11-3.14
+MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | sort -V | awk -F. '$$NF >= 11 {print $$0; exit}' ) )
+export MIN_PYTHON_VERSION
+
+VENV := vtmp
 export VENV
 
-# tested on 3.10-3.14
-MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | awk '{print $0; exit}' ) )
-export MIN_PYTHON_VERSION
+COMMON_VENV := rm -rf $(VENV); \
+	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
+	source ./$(VENV)/bin/activate;
 
 PIP_INSTALL := pip3 -q \
 	--require-virtualenv \
 	--disable-pip-version-check \
 	--no-color install --no-cache-dir
 
+VENV_PIP_INSTALL := $(COMMON_VENV) $(PIP_INSTALL)
+
 # ==========================================
 # Code formatting and checks
-PY_FILES := \
-		*.py \
+PY_FILES := *.py \
 		rl_scan_artifactory/*.py \
-		rl_scan_artifactory/*/*.py
+		rl_scan_artifactory/*/*.py \
+		tools/*.py \
+		tests/*.py
 
-LINE_LENGTH := 120
-PL_LINTERS := eradicate,mccabe,pycodestyle,pyflakes,pylint
+MYPY_INSTALL := -r requirements.txt \
+	types-requests
 
-# C0114 Missing module docstring [pylint]
-# C0115 Missing class docstring [pylint]
-# C0116 Missing function or method docstring [pylint]
-# E203 whitespace before ':' [pycodestyle]
-#
-# W0105 String statement has no effect
-# C901 : is to complex
+# What is not ours to correct: the virtualenv, the drawing, the captured output of
+# past runs, and patch files. The captured output holds the messages as they were
+# spelled at the time and the names of whatever was scanned; a patch file holds
+# the old spelling on its '-' lines, so correcting it would break the patch.
+CODESPELL_SKIP := --skip="./$(VENV),./.git,./keep,*.log,*.1,*.2,*.patch,*.diff,./.mypy_cache,./.ruff_cache,./doc/*.svg"
 
-PL_IGNORE := C0114,C0115,C0116,E203
-
-MYPY_INSTALL := \
-	types-requests \
-	types-python-dateutil \
-	spectra-assure-sdk
-
-COMMON_VENV := rm -rf $(VENV); \
-	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
-	source ./$(VENV)/bin/activate;
-
-.PHONEY: clean prep
+.PHONEY: all clean prep test cleanupVenv dead-code spell
 
 # ==========================================
 
-all: clean prep build test
+all: clean prep unit-test dead-code spell build # test
 
 clean: cleanupVenv
 	rm -f *.1 *.2 *.log *.tmp  1 2
 	rm -rf tmp $(DOWNLOAD_PATH)
 	rm -rf download_temp tmp2
-	rm -rf .mypy_cache
+	rm -rf .mypy_cache .pytest_cache dist .ruff_cache .mypy_cache
+	-@find . -type d -name __pycache__ | xargs rm -fr
 
 # cleanup the virtual env
 cleanupVenv:
@@ -65,35 +60,38 @@ cleanupVenv:
 # ======================================
 # prep the code with format, lint typing
 
-prep: black pylama mypy
+prep: mypy format verify
 	mkdir -p tmp $(DOWNLOAD_PATH)
-	ls -l
 
-black:
+format:
 	$(COMMON_VENV) \
-	$(PIP_INSTALL) black; \
-	black \
-		--line-length $(LINE_LENGTH) \
-		$(PY_FILES)
+		ruff format $(PY_FILES)
 
-pylama:
+verify:
 	$(COMMON_VENV) \
-	$(PIP_INSTALL) setuptools pylama; \
-	pylama \
-		--max-line-length $(LINE_LENGTH) \
-		--linters "${PL_LINTERS}" \
-		--ignore "${PL_IGNORE}" \
-		$(PY_FILES)
+		ruff check --fix $(PY_FILES)
 
 mypy:
-	$(COMMON_VENV) \
-	$(PIP_INSTALL) mypy $(MYPY_INSTALL); \
-	mypy \
-		--strict \
-		--no-incremental \
-		$(PY_FILES)
+	$(VENV_PIP_INSTALL) mypy pytest $(MYPY_INSTALL); \
+		mypy \
+			--strict \
+			--no-incremental \
+			$(PY_FILES)
 
-full_test: clean_both all testpypi
+# ======================================
+
+dead-code:
+	$(COMMON_VENV) \
+		python3 nocheck/find_dead_code.py --strict
+
+# A misspelling in a log line or a --help text is what a user actually reads
+spell:
+	$(VENV_PIP_INSTALL) codespell; \
+		codespell $(CODESPELL_SKIP)
+
+unit-test:
+	$(VENV_PIP_INSTALL) pytest $(MYPY_INSTALL); \
+		python3 -m pytest
 
 test:
 	make -f Makefile.test test
@@ -101,8 +99,11 @@ test:
 build:
 	make -f Makefile.testpypi build
 
+# ======================================
 testpypi:
 	make -f Makefile.testpypi
 
 clean_both:
 	make -f Makefile.clean_both clean_both
+
+full_test: clean_both all testpypi

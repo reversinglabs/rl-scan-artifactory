@@ -2,16 +2,17 @@
 
 import logging
 
+from rl_scan_artifactory.fileinfo import FileInfo
+
 from .name_mangler_common import NameManglerCommon
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
-docker.manifest: not consistent, somtimes a sha256 sometimes the version
+docker.manifest: not consistent, sometimes a sha256 sometimes the version
 docker.repoName: reversinglabs/rl-scanner
 
-Artifactory repo items have a name and version property (often but not allways).
+Artifactory repo items have a name and version property (often but not always).
 But may not have other info to make a unique purl. (e.g. for docker the arch is in the json
 
 Particularly:
@@ -42,12 +43,22 @@ class NameManglerRpm(
     ) -> str:
         remainder = file_name
 
-        # a rpm file is roughly: name version release arch .rpm; parts may be empty except name
-        # according to artifactory may be different the name from the file
+        # a rpm file is roughly: name version release arch .rpm;
+        # parts may be empty except name according to artifactory
+        # may be different the name from the file
         version = self.version  # the artifactory version usually is missing the release part
         name = self._remove_connector_front_and_back(remainder.split(version)[0])
-        release = self.file.properties.get("rpm.metadata.release", [])[0]
-        arch = self.file.properties.get("rpm.metadata.arch", [])[0]
+
+        # not we are not currently failing on missing arch or release
+        release = ""
+        z = self.file.properties.get("rpm.metadata.release")
+        if z and len(z):
+            release = z[0]
+
+        arch = ""
+        z = self.file.properties.get("rpm.metadata.arch")
+        if z and len(z):
+            arch = z[0]
 
         # glibc-gconv-extra-2.34-100.el9_4.3.i686.rpm -> 100.el9_4.3
         os_release, release2 = self._split_release(release=release)
@@ -60,7 +71,8 @@ class NameManglerRpm(
         remainder = self._remove_substring(remainder, version, "front")
         remainder = self._remove_substring(remainder, release, "front")
 
-        self.version = "-".join([version, release2])
+        # only append the release when we actually have one, or the version ends in a bare "-"
+        self.version = f"{version}-{release2}" if release2 else version
 
         logger.debug(
             "remainder: %s, arch: %s, os_release: %s, release: %s, release2: %s version: %s, uri: %s",

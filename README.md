@@ -84,7 +84,7 @@ It also allows users to prevent downloading artifacts that have the `fail` statu
 
 - **An active, valid license for a Spectra Assure product.** You can use the Spectra Assure CLI, or the Spectra Assure Portal, or both products with this integration. For CLI workflows (with `rl-secure` or with the Docker image), we recommend getting the [site-wide deployment license](https://docs.secure.software/cli/licensing-guide). For Portal workflows, you need a [Personal Access Token](https://docs.secure.software/api/generate-api-token) for your Portal account.
 
-- Python (minimal version: 3.10, tested with 3.10 - 3.13)
+- Python (minimal version: 3.11, tested with 3.11 - 3.14)
 
 - [requests](https://pypi.org/project/requests/) >=2.32.5
 
@@ -155,7 +155,7 @@ Follow the [quick start guide](quick-start.md) for instructions on how to get st
 
 ### Environment variables
 
-All environment variables except `LOG_LEVEL` can also be passed to the `rl-scan-artifactory` command as parameters.
+All environment variables can also be passed to the `rl-scan-artifactory` command as parameters.
 Their parameter names are listed in the **Equivalent parameter** column.
 
 
@@ -167,8 +167,8 @@ Their parameter names are listed in the **Equivalent parameter** column.
 | PROXY_SERVER         | --proxy-server       | Server name for proxy configuration (IP address or DNS name). |
 | PROXY_PORT           | --proxy-port         | Network port on the proxy server for proxy configuration. Required if PROXY_SERVER is used. |
 | PROXY_USER           | --proxy-user         | User name for proxy authentication. |
-| PROXY_PASS           | --proxy-pass         | Password for proxy authentication. Required if PROXY_USER is used. |
-| LOG_LEVEL            | Not supported as parameter | Allows controlling the type of output messages displayed in the logs. Set to one of the following: `CRITICAL`, `WARNING`, `INFO`. Default is `WARNING` |
+| PROXY_PASSWORD       | --proxy-password     | Password for proxy authentication. A proxy password must be provided together with the proxy username. |
+| LOG_LEVEL            | --log-level          | Allows controlling the type of output messages displayed in the logs. Set to one of the following: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Default is `WARNING` |
 
 
 **CLI only**
@@ -183,8 +183,8 @@ Their parameter names are listed in the **Equivalent parameter** column.
 
 | Environment variable | Equivalent parameter | Description  |
 | --                   | --                   | --           |
-| RLPORTAL_HOST       | --rlportal-host     | **Required only for the Portal workflow.** Name of the Portal host to use for the scan. <br>The Portal hostname is usually `my.secure.software` unless you have been instructed by ReversingLabs to use a different hostname. As `my.secure.software` is the default, specifying it is optional. <br> The RLPORTAL_HOST and the RLPORTAL_SERVER cannot be both empty. |
-| RLPORTAL_SERVER       | --rlportal-server     | **Required only for the Portal workflow.** Name of the Portal instance to use for the scan. <br> The Portal instance name usually matches the subdirectory of `my.secure.software` in your Portal URL. For example, if your Portal URL is `my.secure.software/demo`, the instance name to use with this parameter is `demo`. <br> The RLPORTAL_HOST and the RLPORTAL_SERVER cannot be both empty. |
+| RLPORTAL_HOST       | --rlportal-host     | **Portal workflow only: this, RLPORTAL_SERVER or both are required.** Name of the Portal host to use for the scan. <br>The Portal hostname is usually `my.secure.software` unless you have been instructed by ReversingLabs to use a different hostname. As `my.secure.software` is the default, specifying it is optional. <br> The RLPORTAL_HOST and the RLPORTAL_SERVER cannot be both empty. |
+| RLPORTAL_SERVER       | --rlportal-server     | **Portal workflow only: this, RLPORTAL_HOST or both are required.** Name of the Portal instance to use for the scan. <br> The Portal instance name usually matches the subdirectory of `my.secure.software` in your Portal URL. For example, if your Portal URL is `my.secure.software/demo`, the instance name to use with this parameter is `demo`. <br> The RLPORTAL_HOST and the RLPORTAL_SERVER cannot be both empty. |
 | RLPORTAL_GROUP        | --rlportal-group      | **Required only for the Portal workflow.** The name of a Portal group to use for the scan. The group must exist in the specified Portal organization. Group names are case-sensitive. |
 | RLPORTAL_ORG          | --rlportal-org        | **Required only for the Portal workflow.** The name of a Portal organization to use for the scan. The organization must exist on the specified Portal instance. The user account authenticated with the token must be a member of the specified organization and have the appropriate permissions to upload and scan a file. Organization names are case-sensitive. |
 | RLPORTAL_ACCESS_TOKEN | --rlportal-access-token | **Required only for the Portal workflow.**  A Personal Access Token for authenticating requests to the Portal. To use the Portal workflow with this integration, you must [create the token](https://docs.secure.software/api/generate-api-token) in your Portal settings. Tokens can expire and be revoked, in which case you'll have to update the value of this environment variable. It's strongly recommended to treat this token as a secret and manage it according to your organization's security best practices. |
@@ -202,7 +202,7 @@ Depending on the product choice, some parameters may be ignored because they are
 | --cli, -C    | Use the Spectra Assure CLI for artifact scanning and generating analysis reports. Requires `rl-deploy` or `rl-secure` to be installed. **Mutually exclusive with --portal and --cli-docker**. |
 | --cli-docker | Use the Spectra Assure CLI Docker image (`reversinglabs/rl-scanner:latest`) for artifact scanning and generating analysis reports. Requires setting the environment variables `RLSECURE_ENCODED_LICENSE` and `RLSECURE_SITE_KEY`. **Mutually exclusive with --cli and --portal**. |
 | --portal, -P    | Use the Spectra Assure Portal for artifact scanning and generating analysis reports. **Mutually exclusive with --cli and --cli-docker**.  |
-| --cli-rlstore-path  | **Required when using --cli or --cli-docker**. Path to an existing [package store](https://docs.secure.software/cli/commands/init#package-store) that the integration can use. |
+| --cli-rlstore-path  | **Required when using --cli, optional with --cli-docker**. Path to an existing [package store](https://docs.secure.software/cli/commands/init#package-store) that the integration can use. With --cli-docker and no store, the package store inside the container is ephemeral and no history is preserved. |
 | --cli-rlsecure-path | **Required when using --cli**. Path to the locally installed `rl-secure` executable. |
 | --sync, -S   | Enables reanalyzing previously scanned artifacts. If a package URL associated with an artifact already exists in the Portal or in the specified package store, this parameter instructs the integration to use the `sync` action instead of `scan`. **Not supported for --cli-docker**. <br />When using the rlArtifactoryPlugin plugin, you won't be able to sync artifacts with status `fail` if you don't allow the server where `rl-scan-artifactory` is running from. <br> See the [rlArtifactoryPlugin Artifactory plugin](#blocking-artifact-downloads) for further instructions. |
 | --pack-safe | Include the [RL-SAFE archive](https://docs.secure.software/concepts/analysis-reports#rl-safe-archive) in the compressed file with analysis reports. **Incompatible with --portal** |
@@ -211,8 +211,25 @@ Depending on the product choice, some parameters may be ignored because they are
 | --ignore-cert-errors | Allow working with invalid or self-signed certificates. Default: `false` |
 | --ignore-artifactory-properties, -I | If specified, the integration will ignore any existing properties set for the scanned artifacts in Artifactory. |
 | --verbose, -v    | Display more detailed progress messages and scan results on stdout. |
+| --log-to-stderr | Also write the log to stderr, in addition to the `<program>.log` file which is always written. Progress output goes to stdout, so the two can be redirected separately. Default: `false` |
+| --keep-obsolete-properties | Preserve the unmaintained properties this integration wrote in earlier versions. If this option is not used, each inspected item loses everything under the old `Spectra.Assure.` prefix, any `RL.*` property the integration no longer writes, and the scan result (`RL.scan-status`, `RL.scan-report`, `RL.package-url`, `RL.organization`, `RL.group`) on a generic `.rl_meta` side-car. The side-car now only keeps `RL.progress`, `RL.timestamp` and `RL.sha256`. A CLI run cleans `.rl_meta` side-cars the same way, though it does not scan them. Report files (`-reports.zip`) keep only `RL.noscan`. `RL.noscan` and properties with other prefixes are never touched. Default: `false` |
+| --ignore-skipped | Exit 0 when the run finished but some artifacts or repositories were skipped; without it such a run exits 103. The skipped items are logged and summarised either way. Default: `false` |
+| --waittime, -w   | **Portal workflow only**. Specify the maximum amount of minutes to wait for a Portal scan to finish. If an artifact is not finished scanning by then, it is postponed for a later run based on its `RL.progress` property. |
 | --version, -V    | Show currently installed version of the integration and exit. |
 | --cli-report-types | A comma-separated list of report formats to generate when using cli or cli-docker mode. <br />Supported values: `cyclonedx`, `rl-checks`, `rl-cve`, `rl-html`, `rl-json`, `rl-uri`, `sarif`, `spdx`, `all`. <br />Default: `all` |
+
+### Exit codes
+
+The integration handles failures per artifact and per repository: one malformed
+artifact does not end the run. The exit code indicates how the run ended.
+
+| Code | Meaning |
+|---|---|
+| 0 | The run finished and every artifact was processed. |
+| 2 | Invalid command line (produced by the argument parser). |
+| 101 | A precondition failed; for example, the Portal server, organization or group could not be verified. No artifacts were processed. |
+| 102 | The run started but did not finish, because of an unexpected error or because it was interrupted with Ctrl-C. |
+| 103 | The run finished, but one or more artifacts or repositories could not be processed. The log lists each of them, and the run ends with a summary line. Use `--ignore-skipped` to exit 0 instead. |
 
 ### Artifactory properties
 
@@ -220,7 +237,7 @@ After scanning the artifacts, the integration adds metadata properties to each t
 For Docker images, the properties are set on the `manifest.json` file.
 The properties are also visible in the Artifactory GUI.
 
-All properties have the `RL` prefix to indicate they are custom properties set by a ReversingLabs integration.
+All properties have the `RL` prefix, which indicates they are custom properties used only by the ReversingLabs integration. This integration removes `RL.*` properties that are no longer maintained. To preserve them, use `--keep-obsolete-properties`.
 
 | Property            | Description     |
 | --                  | --              |
@@ -230,8 +247,9 @@ All properties have the `RL` prefix to indicate they are custom properties set b
 | **RL.scan-report**  | Direct URL to the analysis report for the scanned artifact. |
 | **RL.group**        | Name of the Portal group associated with your account. Applies only if using the Portal. |
 | **RL.organization** | Name of the Portal organization associated with your account. Applies only if using the Portal. |
-| **RL.noscan**       | Used to skip scanning report files uploaded by the integration when using the CLI. Applies only if using the CLI or CLI Docker. Default value is 'true' |
-| **RL.timestamp**    | UTC timestamp of the last operation performed on the artifact. Value: YYYY-MM-DDTHH:MM:SSZ |
+| **RL.noscan**       | Used to skip scanning report files uploaded by the integration when using the CLI. Applies only if using the CLI or CLI Docker. Default value is 'true'. A report file includes only this property; any other `RL.*` property on it is removed. |
+| **RL.timestamp**    | UTC timestamp of the last operation performed on the artifact. On a generic `.rl_meta` side-car it is also updated when a CLI scan handles the file the side-car describes. Value: YYYY-MM-DDTHH:MM:SSZ |
+| **RL.sha256**       | The SHA256 of the artifact the other properties are about. When an artifact is rebuilt and redeployed to the same path, a later run sees a different SHA256 and scans it again instead of skipping it on the old properties. Not written for Docker images. |
 
 
 ## Working with Docker images

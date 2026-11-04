@@ -38,12 +38,12 @@ class ArtifactoryCleanup(
 
             repo_list = self.cli_args.get("repo")
             if repo_list is None or len(repo_list) == 0:
-                print(uri)
+                logger.info(uri)
                 continue
 
             for repo in repo_list:
                 if f"/storage/{repo}/" in uri or f"/storage/{repo}-cache/" in uri:
-                    print(uri)
+                    logger.info(uri)
 
 
 def main() -> None:

@@ -1,22 +1,18 @@
 # python3 ts=4space
 import logging
-import os
+import pathlib
 import re
 import urllib.parse
 
-from typing import (
-    Tuple,
-)
-
-from ..fileinfo import FileInfo
+from rl_scan_artifactory.fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
-docker.manifest: not consistent, somtimes a sha256 sometimes the version
+docker.manifest: not consistent, sometimes a sha256 sometimes the version
 docker.repoName: reversinglabs/rl-scanner
 
-Artifactory repo items have a name and version property (often but not allways).
+Artifactory repo items have a name and version property (often but not always).
 But may not have other info to make a unique purl. (e.g. for docker the arch is in the json
 
 Particularly:
@@ -33,34 +29,63 @@ between versions of the same architecture and build-environments.
 
 
 class NameManglerCommon:
-
     def __init__(
         self,
         file: FileInfo,
     ) -> None:
-        self.remainder: str = ""
+        if not file.repo.name:
+            msg = "missing name in FileInfo"
+            raise ValueError(msg)
+        if not file.repo.package_type:
+            msg = "package_type name in FileInfo"
+            raise ValueError(msg)
+
         self.file = file
-        # start with some basic info
         self.project = self.file.repo.name
-        self.package = self.file.simple.get("name", [])[0]
-        self.version = self.file.simple.get("version", [])[0]
         self.p_type = self.file.repo.package_type.lower()
+
+        self.remainder: str = ""
+
+        if not self.file.simple:
+            msg = "no simple part in file info"
+            raise ValueError(msg)
+
+        self.package = self._one_simple_value("name")
+        self.version = self._one_simple_value("version")
+
+    def _one_simple_value(
+        self,
+        key: str,
+    ) -> str:
+        """One non-empty simple value, or refuse.
+
+        An empty package or version would go straight into the purl and make a
+        project on the portal that no later build can ever match, so a missing
+        value has to stop here rather than travel on.
+        """
+        values = self.file.simple.get(key)
+        if not values or not values[0]:
+            msg = f"missing '{key}' in the simple data of {self.file.uri}"
+            raise ValueError(msg)
+
+        value: str = values[0]
+        return value
 
     @staticmethod
     def _escape_string_for_spectra_assure_purl_component(
         string: str,
     ) -> str:
         s = string
-        # s = string.replace(":", "0x3a") # .. does not work on cli , translate to 0x3a
         s = urllib.parse.quote_plus(s)  # will also deal with : but ' ' becomes '+'
-        s = s.replace("%", "0x")
-        return s
+        return s.replace("%", "0x")
 
     @staticmethod
     def _remove_connector_front_and_back(
         what: str,
     ) -> str:
-        """Remove connector characters like -, _, . from the front and back of a string
+        """
+        Remove connector characters like -, _, . from the front and back of a string
+
         In:
          - what: str
         Out:
@@ -80,7 +105,7 @@ class NameManglerCommon:
             what = what[: (-1 * len(match[0]))]
 
         logger.debug("what: %s", what)
-        return what
+        return str(what)
 
     def _remove_substring_front(
         self,
@@ -108,8 +133,8 @@ class NameManglerCommon:
         # for now we ignore multiple times str2, and we start from the beginning
         if str2.lower() in str1.lower():
             start = str1.lower().index(str2.lower())
-            if start > 0:
-                str1 = str1[:start] + str1[start + len(str2)]
+            if start:
+                str1 = str1[:start] + str1[start + len(str2) :]
         return self._remove_connector_front_and_back(str1)
 
     def _remove_substring(
@@ -118,13 +143,15 @@ class NameManglerCommon:
         str2: str,
         what: str = "all",
     ) -> str:
-        valid = [
+        valid = {
             "all",
             "front",
             "tail",
             "mid",
-        ]
-        assert what in valid
+        }
+        if what not in valid:
+            msg = f"unknown argument what: {what}"
+            raise RuntimeError(msg)
 
         logger.debug("str1: |%s|, str2: |%s|, what: %s", str1, str2, what)
 
@@ -134,17 +161,17 @@ class NameManglerCommon:
         if str1.lower() == str2.lower():
             return ""
 
-        if what in ["all", "front"]:
+        if what in {"all", "front"}:
             str1 = self._remove_substring_front(str1=str1, str2=str2)
             if what == "front":
                 return self._remove_connector_front_and_back(str1)
 
-        if what in ["all", "tail"]:
+        if what in {"all", "tail"}:
             str1 = self._remove_substring_tail(str1=str1, str2=str2)
             if what == "tail":
                 return self._remove_connector_front_and_back(str1)
 
-        if what in ["all", "mid"]:
+        if what in {"all", "mid"}:
             str1 = self._remove_substring_mid(str1=str1, str2=str2)
             if what == "mid":
                 return self._remove_connector_front_and_back(str1)
@@ -156,7 +183,7 @@ class NameManglerCommon:
         str1: str,
         str2: str,
     ) -> str:
-        if str1.lower().endswith(str2):
+        if str1.lower().endswith(str2.lower()):
             return str1[: (-1 * len(str2))]
         return str1
 
@@ -164,8 +191,9 @@ class NameManglerCommon:
         self,
         release: str,
         separator: str = ".",
-    ) -> Tuple[str, str]:
-        """trailing data after the os build part:
+    ) -> tuple[str, str]:
+        """
+        Trailing data after the os build part:
 
         e.g.
          - glibc-gconv-extra-2.34-100.el9_4.3.i686.rpm
@@ -190,15 +218,20 @@ class NameManglerCommon:
             DISTRIBUTION:Rocky Linux 9.4
 
         """
-        # release is purely a number
-        if re.match(r"^\d+$", release):
-            return "", str(int(release))
+
+        # release is purely a number or number having . or that with - in between
+        # if re.match(r"^\d+$", release):
+        if re.match(r"^[-\d\.]+$", release):  # fix for D5: (\d | \.)+
+            return "", release
 
         os_release = ""
         if separator in release:
-            os_release = release.split(separator)[1]
-            if os_release[0].isdigit():  # so far the platform always starts with a letter
-                os_release = ""
+            parts = release.split(separator)
+            candidate = parts[1] if len(parts) > 1 else ""
+            # so far the platform always starts with a letter; an empty segment
+            # (e.g. '1..el9') has no first character to look at
+            if candidate and not candidate[0].isdigit():
+                os_release = candidate
 
         # just the platform string and anything after it (fc40, el9, ...) ;; may not be there
         os_release = self._remove_connector_front_and_back(os_release)
@@ -214,19 +247,17 @@ class NameManglerCommon:
 
     def _combine_args(
         self,
-        *arg_list: str,
+        *args: str,
         combiner: str = "_",
     ) -> str:
         zz = []
-        for item in arg_list:
-            if len(item):
+        for item in args:
+            if item:
                 zz.append(item)
 
-        return self._remove_connector_front_and_back(
-            combiner.join(
-                zz,
-            ),
-        )
+        pp = str(combiner.join(zz))
+
+        return self._remove_connector_front_and_back(pp)
 
     def _mangle_default(
         self,
@@ -238,18 +269,19 @@ class NameManglerCommon:
 
         logger.debug("in: %s", remainder)
 
-        aa = remainder.split(version)
-        if len(aa) == 2 and len(aa[0]) > 0 and len(aa[1]) > 0:
-            logger.debug("aa[0]: %s", aa[0])
-            logger.debug("aa[1]: %s", aa[1])
-            aa[0] = self._remove_connector_front_and_back(aa[0])
-            aa[1] = self._remove_connector_front_and_back(aa[1])
-            # we may need to strip connector signs from aa[0] and aa[1]
-            # we have a successful split on version
-            if aa[0].lower() in name.lower():
-                return aa[1]
+        if version:
+            aa = remainder.split(version)
+            if len(aa) == 2 and len(aa[0]) > 0 and len(aa[1]) > 0:
+                logger.debug("aa[0]: %s", aa[0])
+                logger.debug("aa[1]: %s", aa[1])
+                aa[0] = self._remove_connector_front_and_back(aa[0])
+                aa[1] = self._remove_connector_front_and_back(aa[1])
+                # we may need to strip connector signs from aa[0] and aa[1]
+                # we have a successful split on version
+                if aa[0].lower() in name.lower():
+                    return aa[1]
 
-            logger.debug("inspection needed: name: %s ;; %s", name, aa[0])
+                logger.debug("inspection needed: name: %s ;; %s", name, aa[0])
 
         remainder = remainder.replace(self.package, "", 1)  # remove the item name
         remainder = self._remove_connector_front_and_back(remainder)
@@ -259,7 +291,8 @@ class NameManglerCommon:
             remainder = remainder.replace(z, "", 1)
             remainder = self._remove_connector_front_and_back(remainder)
 
-        remainder = remainder.replace(self.version, "", 1)  # remove the version
+        if self.version:
+            remainder = remainder.replace(self.version, "", 1)  # remove the version
         remainder = self._remove_connector_front_and_back(remainder)
 
         logger.debug("out: %s", remainder)
@@ -272,10 +305,10 @@ class NameManglerCommon:
         return self._mangle_default(file_name=file_name)
 
     # PUBLIC
-    def make_long(
+    def make_long(  # used by: artifactory_file_processor/artifactory_file_processor_common.py
         self,
-    ) -> Tuple[str, str, str]:
-        file_name = os.path.basename(self.file.uri)
+    ) -> tuple[str, str, str]:
+        file_name = pathlib.Path(self.file.uri).name
 
         self.remainder = self._mangle(
             file_name=file_name,
@@ -298,5 +331,4 @@ class NameManglerCommon:
             package,
             version,
         )
-
         return project, package, version

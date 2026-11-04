@@ -1,24 +1,27 @@
 # python3 ts=4space
 
+import logging
 from typing import (
-    Dict,
     Any,
 )
 
-import logging
+from rl_scan_artifactory.artifactory_api import ArtifactoryApi
+from rl_scan_artifactory.constants import (
+    DERIVED_PROPERTY_INFIX,
+    JAR_TAIL,
+    MAVEN_URI_MIN_SEGMENTS,
+)
+from rl_scan_artifactory.fileinfo import FileInfo
 
-# from .simple_data import SimpleData
 from .file_properties_common import FilePropertiesCommon
-from ..artifactory_api import ArtifactoryApi
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
 We are hunting for properties so that we can build a package url.
 
-- name                # allways
-- version             # allways
+- name                # always
+- version             # always
 - arch (architecture) # optional
 - namespace           # optional
 
@@ -55,7 +58,7 @@ class FilePropertiesMaven(
 ):
     def __init__(
         self,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         file: FileInfo,
         artifactory_api: ArtifactoryApi,
     ) -> None:
@@ -75,12 +78,9 @@ class FilePropertiesMaven(
 
         # we have no properties: parse the uri to get name and version and namespace
         uri = self.file.uri
-        if not uri.lower().endswith("jar"):
+        if not uri.lower().endswith(JAR_TAIL):
             self.file.properties = self.props
             return
-
-        aa = uri.split("/")
-        logger.debug("%s", aa)
 
         # /org/apache/logging/log4j/log4j-api/2.12.1/log4j-api-2.12.1.jar
         # note that namespace + name is unique and name is not required to be the end of namespace
@@ -88,17 +88,29 @@ class FilePropertiesMaven(
         # name = log4j-api
         # version = 2.12.1
 
+        aa = uri.split("/")
+        if aa and aa[0] == "":  # a leading '/' gives an empty first segment
+            aa = aa[1:]
+
+        logger.debug("%s", aa)
+
+        # <namespace...>/<name>/<version>/<file>: four segments is the shortest
+        # layout that has all of them, and every part must be non empty
+        if len(aa) < MAVEN_URI_MIN_SEGMENTS or not all(aa):
+            logger.warning(
+                "SKIP: %s uri is not a maven layout <namespace>/<name>/<version>/<file>: %s",
+                what,
+                uri,
+            )
+            self.file.properties = self.props
+            return
+
         # file_name = aa[-1]
         version = aa[-2]
         name = aa[-3]
+        namespace = ".".join(aa[:-3])
 
-        # the rest is namespace
-        if aa[0] == "":
-            namespace = ".".join(aa[1:-3])
-        else:
-            namespace = ".".join(aa[:-3])
-
-        front = f"{what}._derived_"
+        front = f"{what}.{DERIVED_PROPERTY_INFIX}"
         self.props[f"{front}.name"] = [namespace + "." + name]
         self.props[f"{front}.name_only"] = [name]
         self.props[f"{front}.version"] = [version]
@@ -107,11 +119,11 @@ class FilePropertiesMaven(
         logger.debug("properties are now: %s", str(self.props))
         self.file.properties = self.props
 
-    def skip_non_candidate_file(
+    def _skip_non_candidate_file(
         self,
     ) -> bool:
-        k = "jar"
-        if not self.uri.endswith(k):
+        k = JAR_TAIL
+        if not self.uri.lower().endswith(k):
             logger.debug("SKIP: %s not a '%s' file: %s", self.p_type, k, self.uri)
             self.file.simple = {}
             return True

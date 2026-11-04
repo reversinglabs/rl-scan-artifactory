@@ -2,9 +2,9 @@
 
 In this guide, you will learn how to scan artifacts in your Artifactory repository with all supported Spectra Assure products:
 
-- the [CLI](#CLI)
-- the [Portal](#Portal)
-- the [CLI Docker image](#Docker)
+- the [CLI](#cli)
+- the [Portal](#portal)
+- the [CLI Docker image](#docker)
 
 The guide relies on example scripts provided in this GitHub repository.
 You can copy the scripts and modify them to include the configuration relevant for your use-case.
@@ -35,11 +35,11 @@ export VENV="venv-rl-scan-artifactory"
 # Temporary download location for artifacts
 export DOWNLOAD_PATH="./download_temp"
 
-# Requires python3 >= 3.10
-export PYTHON_VERSION="python3.10"
+# Requires python3 >= 3.11
+export PYTHON_VERSION="python3.11"
 
 # We write a log file in the directory where you start rl-scan-artifactory
-export LOG_LEVEL="WARNING" # one of [ERROR, WARNING, INFO]: default WARNING
+export LOG_LEVEL="WARNING" # one of [DEBUG, INFO, WARNING, ERROR, CRITICAL]: default WARNING
 
 # Artifactory: all 3 are mandatory
 export ARTIFACTORY_HOST="your artifactory host fqdn without https://"
@@ -50,7 +50,7 @@ export ARTIFACTORY_TOKEN="your artifactory token"
 export PROXY_SERVER="" # your proxy server
 export PROXY_PORT="" # if a host is specified, you also must set a port
 export PROXY_USER="" # optional
-export PROXY_PASS="" # if a user is specified, you will most likely need a password
+export PROXY_PASSWORD="" # a proxy user and a proxy password must be used together or not at all
 
 # We only support 'local' and 'remote' repositories.
 # Do not specify the cache repo name but specify the remote repo name.
@@ -95,11 +95,14 @@ RL_REPORTS_REPO="Spectra-Assure-Reports"
 
 ## Portal
 
-To use the Spectra Assure Portal for scanning artifacts, you will have to specify the following details in the configuration:
+To use the Spectra Assure Portal for scanning artifacts, you will have to specify the following details in the configuration.
+The Portal is defined by its instance name (`RLPORTAL_SERVER`), its host (`RLPORTAL_HOST`), or both; at least one of the two is required.
+The instance name alone means `my.secure.software/<instance>`, which is what most users need.
 
 ```shell
-# Spectra Assure Portal: all 4 are mandatory
+# Spectra Assure Portal: ORG, GROUP and ACCESS_TOKEN are mandatory, and SERVER, HOST or both
 export RLPORTAL_SERVER="Name of your Spectra Assure Portal instance"
+export RLPORTAL_HOST="" # optional: only if ReversingLabs gave you a host other than my.secure.software
 export RLPORTAL_ORG="Spectra Assure Portal organization your account belongs to"
 export RLPORTAL_GROUP="Spectra Assure Portal group your account is a member of"
 export RLPORTAL_ACCESS_TOKEN="Personal access token for your Spectra Assure Portal account"
@@ -113,6 +116,7 @@ export RLPORTAL_ACCESS_TOKEN="Personal access token for your Spectra Assure Port
 To use the Spectra Assure CLI Docker image (`reversinglabs/rl-scanner:latest`) for scanning artifacts, you will have to specify the site key and the Base64-encoded license file of your [site-wide deployment license](https://docs.secure.software/cli/licensing-guide#site-wide-deployment-license).
 
 If you don't provide the path to an external package store, an ephemeral store is created inside the Docker container.
+The example script passes `RL_STORE_PATH` to the integration with `--cli-rlstore-path` only when it is set.
 
 ```shell
 # Required
@@ -139,3 +143,18 @@ RL_REPORTS_REPO="Spectra-Assure-Reports"
 ```
 
 **Complete the configuration in the example script and run it:** [example_docker.sh](./doc/example_docker.sh)
+
+
+## Running the scan in a pipeline
+
+Each run writes its log to `rl-scan-artifactory.log` in the directory where you start it.
+The exit code says how the run ended:
+
+- `0`: the run finished and every artifact was processed
+- `2`: the command line is invalid
+- `101`: a precondition failed, for example a missing setting, and no work was done
+- `102`: the run started but did not finish
+- `103`: the run finished, but some artifacts or repositories were skipped; they are listed in the log
+
+Use `--ignore-skipped` if skipped items should not fail your pipeline: the run then exits `0` instead of `103`.
+See [Exit codes](./README.md#exit-codes) in the README for details.

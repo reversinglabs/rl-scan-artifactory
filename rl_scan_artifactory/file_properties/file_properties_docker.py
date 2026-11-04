@@ -1,25 +1,26 @@
 # python3 ts=4space
 
+import logging
 from typing import (
-    Dict,
     Any,
 )
 
+from rl_scan_artifactory.artifactory_api import ArtifactoryApi
+from rl_scan_artifactory.constants import (
+    DERIVED_PROPERTY_INFIX,
+    DOCKER_URI_MIN_SEGMENTS,
+)
+from rl_scan_artifactory.fileinfo import FileInfo
 
-import logging
-
-# from .simple_data import SimpleData
 from .file_properties_common import FilePropertiesCommon
-from ..artifactory_api import ArtifactoryApi
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
 """
 We are hunting for properties so that we can build a package url.
 
-- name                # allways
-- version             # allways
+- name                # always
+- version             # always
 - arch (architecture) # optional
 - namespace           # optional
 
@@ -59,7 +60,7 @@ class FilePropertiesDocker(
 
     def __init__(
         self,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         file: FileInfo,
         artifactory_api: ArtifactoryApi,
     ) -> None:
@@ -84,18 +85,29 @@ class FilePropertiesDocker(
             file=self.file,
         )
 
-        aa = self.uri.split("/")
-        logger.debug("%s", aa)
-        assert aa[0] == ""  # the starting / makes aa[0] == ""
-        aa.pop(0)
-
-        tail = aa.pop()
-        assert tail.endswith(self.k)
-
         # for remote docker repo's: len should be 5 /<org>/<name>/<version>/<manifest_json>
         # for local we may not have a org part
         # e.g upload python/alpine results in /python/alpine/manifest.json
 
+        aa = self.uri.split("/")
+        if aa and aa[0] == "":  # a leading '/' gives an empty first segment
+            aa = aa[1:]
+
+        logger.debug("%s", aa)
+
+        # <name>/<version>/<manifest json> is the shortest layout that has
+        # both a name and a version; an org part may precede it
+        if len(aa) < DOCKER_URI_MIN_SEGMENTS or not all(aa):
+            logger.warning(
+                "SKIP: %s uri is not a docker layout [<org>/]<name>/<version>/%s: %s",
+                self.p_type,
+                self.k,
+                self.uri,
+            )
+            self.file.properties = self.props
+            return
+
+        aa.pop()  # the manifest file name itself
         version = aa.pop()
         name = aa.pop()
 
@@ -104,14 +116,14 @@ class FilePropertiesDocker(
             if len(org) > 0:
                 name = f"{org}/{name}"
 
-        front = f"{self.what}._derived_"
+        front = f"{self.what}.{DERIVED_PROPERTY_INFIX}"
         self.props[f"{front}.name"] = [name]
         self.props[f"{front}.version"] = [version]
 
         logger.debug("properties are now: %s", str(self.props))
         self.file.properties = self.props
 
-    def skip_non_candidate_file(
+    def _skip_non_candidate_file(
         self,
     ) -> bool:
         if not self.uri.endswith(self.k):

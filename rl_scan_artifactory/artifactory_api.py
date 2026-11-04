@@ -2,27 +2,40 @@
 import hashlib
 import logging
 import os
+import pathlib
+import re
 import time
 from typing import (
-    Dict,
     Any,
-    Tuple,
-    List,
 )
 
 import requests
 import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .app_base_with_logging import AppBaseWithLogging
 from .artifactory_repo_info import ArtifactoryRepoInfo
+from .constants import (
+    ARTIFACTORY_DOWNLOAD_TIMEOUT,
+    DEFAULT_DIGEST_TYPE,
+    DOWNLOAD_ANSWERED_STATUSES,
+    DOWNLOAD_RETRY_WAIT_SECONDS,
+    HTTP_RETRY_BACKOFF,
+    HTTP_RETRY_METHODS,
+    HTTP_RETRY_STATUSES,
+    HTTP_RETRY_TOTAL,
+    RECURSIVE_PROPS_LIMIT_PATTERN,
+    RECURSIVE_PROPS_RETRY_STATUS,
+    VERIFY_BUF_SIZE,
+)
+from .exceptions import (
+    SpectraAssureInvalidAction,
+    SpectraAssureInvariantError,
+)
 from .fileinfo import FileInfo
 from .helpers import set_proxy
 from .my_args import MyArgs
-from .constants import (
-    ARTIFACTORY_DOWNLOAD_TIMEOUT,
-    VERIFY_BUF_SIZE,
-    DEFAULT_DIGEST_TYPE,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +48,7 @@ class ArtifactoryApiBase(
         args: MyArgs,
     ) -> None:
         super().__init__(args)
-        self.session = requests.Session()
+        self.session = self._make_session()
         self._validate_my_params()
         self.timeout = ARTIFACTORY_DOWNLOAD_TIMEOUT  # 2 hours for large downloads
 
@@ -47,7 +60,7 @@ class ArtifactoryApiBase(
         if proxy_port:
             proxy_port = int(proxy_port)
 
-        self.proxies: Dict[str, str] = set_proxy(
+        self.proxies: dict[str, str] = set_proxy(
             server=proxy_server,
             port=proxy_port,
             user=proxy_user,
@@ -58,25 +71,67 @@ class ArtifactoryApiBase(
         self,
     ) -> None:
         self.host = self.cli_args.get("artifactory_host")
-        assert self.host is not None
+        if self.host is None:
+            msg = "expected self.host is not None"
+            raise SpectraAssureInvariantError(msg)
 
         self.user = self.cli_args.get("artifactory_user")
-        assert self.user is not None
+        if self.user is None:
+            msg = "expected self.user is not None"
+            raise SpectraAssureInvariantError(msg)
 
         self.token = self.cli_args.get("artifactory_token")
         self.api_key = self.cli_args.get("artifactory_api_key")
-        assert self.token is not None or self.api_key is not None
+        if not (self.token is not None or self.api_key is not None):
+            msg = "expected self.token is not None or self.api_key is not None"
+            raise SpectraAssureInvariantError(msg)
 
         self.base_url = f"https://{self.host}/artifactory"
 
         if self.cli_args.get("ignore_cert_errors", False):
-            urllib3.disable_warnings()
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            msg = (
+                "certificate verify has been switched off as requested;"
+                + " this will work both on the portal and artifactory"
+            )
+            logger.warning(msg)
             self.session.verify = False
+
+    @staticmethod
+    def _make_session() -> requests.Session:
+        """One session for every call, retrying what is worth retrying.
+
+        A run walks thousands of artifacts over minutes or hours, so a connection
+        that drops once is expected. Without this, a single dropped connection on
+        one report upload ended the run.
+
+        Only transport failures and the statuses that mean "not now" are retried.
+        A request artifactory answered - 401, 403, 404, or the 400 of the
+        recursive property cap - is an answer, and retrying it would only be
+        slower (R11.5.x handles that one itself).
+        """
+        session = requests.Session()
+
+        retry = Retry(
+            total=HTTP_RETRY_TOTAL,
+            connect=HTTP_RETRY_TOTAL,
+            read=HTTP_RETRY_TOTAL,
+            status=HTTP_RETRY_TOTAL,
+            backoff_factor=HTTP_RETRY_BACKOFF,
+            status_forcelist=list(HTTP_RETRY_STATUSES),
+            allowed_methods=list(HTTP_RETRY_METHODS),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+
+        return session
 
     def _request_get(
         self,
         url: str,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         if params is None:
             params = {}
@@ -93,8 +148,12 @@ class ArtifactoryApiBase(
                 proxies=self.proxies,
             )
         else:
-            assert self.token is not None
-            assert self.user is not None
+            if self.token is None:
+                msg = "expected self.token is not None"
+                raise SpectraAssureInvariantError(msg)
+            if self.user is None:
+                msg = "expected self.user is not None"
+                raise SpectraAssureInvariantError(msg)
             r = self.session.get(
                 url,
                 auth=(self.user, self.token),
@@ -109,7 +168,7 @@ class ArtifactoryApiBase(
     def _request_put(
         self,
         url: str,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         if params is None:
             params = {}
@@ -127,8 +186,12 @@ class ArtifactoryApiBase(
                 proxies=self.proxies,
             )
         else:
-            assert self.token is not None
-            assert self.user is not None
+            if self.token is None:
+                msg = "expected self.token is not None"
+                raise SpectraAssureInvariantError(msg)
+            if self.user is None:
+                msg = "expected self.user is not None"
+                raise SpectraAssureInvariantError(msg)
             r = self.session.put(
                 url,
                 auth=(self.user, self.token),
@@ -144,17 +207,21 @@ class ArtifactoryApiBase(
         self,
         url: str,
         file_path: str,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         if params is None:
             params = {}
 
         logger.debug("url: %s:: %s", url, params)
 
-        assert self.token is not None
-        assert self.user is not None
+        if self.token is None:
+            msg = "expected self.token is not None"
+            raise SpectraAssureInvariantError(msg)
+        if self.user is None:
+            msg = "expected self.user is not None"
+            raise SpectraAssureInvariantError(msg)
 
-        with open(file_path, "rb") as upload_data:
+        with pathlib.Path(file_path).open("rb") as upload_data:
             r = self.session.put(
                 url,
                 auth=(self.user, self.token),
@@ -170,7 +237,7 @@ class ArtifactoryApiBase(
     def _request_del(
         self,
         url: str,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         if params is None:
             params = {}
@@ -188,8 +255,12 @@ class ArtifactoryApiBase(
                 proxies=self.proxies,
             )
         else:
-            assert self.token is not None
-            assert self.user is not None
+            if self.token is None:
+                msg = "expected self.token is not None"
+                raise SpectraAssureInvariantError(msg)
+            if self.user is None:
+                msg = "expected self.user is not None"
+                raise SpectraAssureInvariantError(msg)
             r = self.session.delete(
                 url,
                 auth=(self.user, self.token),
@@ -204,8 +275,8 @@ class ArtifactoryApiBase(
     def _request_post(
         self,
         url: str,
-        data: Dict[str, Any],
-        headers: Dict[str, Any] | None = None,
+        data: dict[str, Any],
+        headers: dict[str, Any] | None = None,
     ) -> Any:
         if headers is None:
             headers = {}
@@ -223,47 +294,18 @@ class ArtifactoryApiBase(
                 proxies=self.proxies,
             )
         else:
-            assert self.token is not None
-            assert self.user is not None
+            if self.token is None:
+                msg = "expected self.token is not None"
+                raise SpectraAssureInvariantError(msg)
+            if self.user is None:
+                msg = "expected self.user is not None"
+                raise SpectraAssureInvariantError(msg)
             r = self.session.post(
                 url,
                 auth=(self.user, self.token),
                 timeout=self.timeout,
                 headers=headers,
                 json=data,
-                proxies=self.proxies,
-            )
-
-        logger.debug("status: %d, %s", r.status_code, r.text)
-        return r
-
-    def _request_patch(
-        self,
-        url: str,
-        data: Dict[str, Any],
-        headers: Dict[str, Any],
-    ) -> Any:
-        logger.debug("url: %s::%s", url, data)
-        # Supported by local and local-cached repositories.
-
-        if self.api_key:
-            headers["X-JFrog-Art-Api"] = self.api_key
-
-            r = self.session.patch(
-                url,
-                headers=headers,
-                timeout=300,
-                proxies=self.proxies,
-            )
-        else:
-            assert self.token is not None
-            assert self.user is not None
-            r = self.session.patch(
-                url,
-                data={"props": data},
-                auth=(self.user, self.token),
-                headers=headers,
-                timeout=300,
                 proxies=self.proxies,
             )
 
@@ -285,10 +327,21 @@ class ArtifactoryApi(ArtifactoryApiBase):
         sha256: str,
         download_path: str,
     ) -> bool:
+        """True when the file matches sha256, False when it does not.
+
+        There is no third answer here: 'nothing to verify against' is not a
+        verification outcome and must be decided before calling, which is what
+        download_url_to_target_with_verify does. An empty or absent digest
+        reaching this point is a bug in the caller, not a mismatch to report.
+        """
+        if not sha256:
+            msg = f"no digest to verify {download_path} against"
+            raise SpectraAssureInvalidAction(msg)
+
         what = DEFAULT_DIGEST_TYPE
 
         h = hashlib.new(what)
-        with open(download_path, "rb") as f:
+        with pathlib.Path(download_path).open("rb") as f:
             while True:
                 data = f.read(VERIFY_BUF_SIZE)
                 if not data:
@@ -300,7 +353,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
         if digest.lower() == sha256.lower():
             return True
 
-        logger.warn(
+        logger.warning(
             "file: %s with digest(%s): %s is not identical to artifactory sha2: %s",
             download_path,
             what,
@@ -315,13 +368,19 @@ class ArtifactoryApi(ArtifactoryApiBase):
         file_path: str,
         attempts: int = 2,
     ) -> str | None:
-        """Downloads a URL content into a file (with large file support by streaming).
+        """
+        Downloads a URL content into a file (with large file support by streaming).
 
         :param url: URL to download.
         :param file_path: Local file name to contain the data downloaded.
         :param attempts: Number of attempts.
 
         :return: New file path. None if the download failed.
+
+        A status that is an answer is not retried: 403 is how artifactory refuses
+        an artifact a policy plugin has blocked, and asking again only spends the
+        wait. A run over a repository of blocked artifacts used to spend twenty
+        seconds per artifact re-asking a settled question.
         """
         logger.debug(f"Downloading {url} content to {file_path}")
 
@@ -329,7 +388,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
         for attempt in range(1, attempts + 1):
             try:
                 if attempt > 1:
-                    time.sleep(10)  # 10 seconds wait time between downloads
+                    time.sleep(DOWNLOAD_RETRY_WAIT_SECONDS)
 
                 if self.api_key:
                     headers = {"X-JFrog-Art-Api": self.api_key}
@@ -341,8 +400,12 @@ class ArtifactoryApi(ArtifactoryApiBase):
                         proxies=self.proxies,
                     )
                 else:
-                    assert self.token is not None
-                    assert self.user is not None
+                    if self.token is None:
+                        msg = "expected self.token is not None"
+                        raise SpectraAssureInvariantError(msg)
+                    if self.user is None:
+                        msg = "expected self.user is not None"
+                        raise SpectraAssureInvariantError(msg)
                     r = self.session.get(
                         url,
                         auth=(self.user, self.token),
@@ -352,18 +415,48 @@ class ArtifactoryApi(ArtifactoryApiBase):
                     )
 
                 r.raise_for_status()
-                with open(file_path, "wb") as out_file:
-                    for chunk in r.iter_content(
-                        chunk_size=chunk_size,
-                    ):
-                        out_file.write(chunk)
+                with pathlib.Path(file_path).open("wb") as out_file:
+                    out_file.writelines(
+                        r.iter_content(
+                            chunk_size=chunk_size,
+                        ),
+                    )
 
                 logger.info("Download finished successfully: %s", file_path)
                 return file_path
 
-            except Exception as ex:
-                logger.error(f"Attempt #{attempt} failed with error: {ex}")
+            except requests.HTTPError as ex:
+                status = ex.response.status_code if ex.response is not None else 0
+                if status in DOWNLOAD_ANSWERED_STATUSES:
+                    logger.error("%s: %s", self._download_refusal(status), url)
+                    return None
+
+                logger.error("Attempt #%s failed with error: %s", attempt, ex)
+
+            except Exception as ex:  # noqa: BLE001
+                logger.error("Attempt #%s failed with error: %s", attempt, ex)
+
         return None
+
+    @staticmethod
+    def _download_refusal(
+        status: int,
+    ) -> str:
+        """Say what a refusal means, so a run does not look like a network problem.
+
+        A 403 on an artifact that exists is almost always a policy plugin such as
+        Spectra Assure Protect refusing to serve something that failed a scan, or
+        an address that is not on its allow list. Reporting that as "download
+        failed" sends people looking at the network.
+        """
+        if status == 403:
+            return "download refused (403): blocked by a policy, or this address is not permitted"
+        if status == 404:
+            return "download refused (404): not found"
+        if status == 401:
+            return "download refused (401): not authenticated"
+
+        return f"download refused ({status})"
 
     @staticmethod
     def _make_target_name(
@@ -371,17 +464,35 @@ class ArtifactoryApi(ArtifactoryApiBase):
         file_name: str,
         target_name: str | None,
     ) -> str:
-        if target_name is None:
-            return "/".join([download_dir, file_name])
+        """Build the download path: one plain file directly inside download_dir.
 
-        return "/".join([download_dir, target_name])
+        Both names are derived from a repository uri we do not control, so a path
+        separator or a parent reference in one would put the download outside the
+        directory we later clean up. Refuse rather than sanitise: every legitimate
+        caller passes a flat file name already.
+        """
+        name = file_name if target_name is None else target_name
+
+        if name in ("", ".", "..") or "/" in name or "\\" in name:
+            msg = f"refusing to download to '{name}': not a plain file name"
+            raise SpectraAssureInvalidAction(msg)
+
+        return "/".join([download_dir, name])
 
     def download_url_to_target_with_verify(
         self,
         url: str,
         target_path: str,
         sha256: str | None = None,
-    ) -> Tuple[str | None, bool]:
+    ) -> tuple[str | None, bool | None]:
+        """
+        Download `url` to `target_path` and verify the result against `sha256`.
+
+        :return: (download path or None, verify result)
+            The verify result is True on a digest match, False on a mismatch,
+            and None when there was nothing to verify against
+            (no sha256 given, or nothing was downloaded).
+        """
         logger.debug("%s -> %s, %s", url, target_path, sha256)
 
         download_path = self.download_url_to_file(
@@ -389,11 +500,10 @@ class ArtifactoryApi(ArtifactoryApiBase):
             file_path=target_path,
         )
 
-        if sha256 is None:
-            return download_path, False
-
-        verify_ok = False
-        if download_path is not None:
+        # an empty sha2 from artifactory is as good as none: there is nothing to
+        # verify against, which is None rather than a failed verification
+        verify_ok: bool | None = None
+        if sha256 and download_path is not None:
             verify_ok = self._verify_download_file(
                 sha256=sha256,
                 download_path=download_path,
@@ -413,7 +523,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
         file: FileInfo,
         download_dir: str = "/tmp",
         target_name: str | None = None,
-    ) -> Tuple[str | None, bool]:
+    ) -> tuple[str | None, bool | None]:
         file_name = os.path.basename(file.uri)
 
         target_path = self._make_target_name(
@@ -433,9 +543,9 @@ class ArtifactoryApi(ArtifactoryApiBase):
     # repository info
     @staticmethod
     def list_repo_items_valid_qp(
-        qp: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        keys: Dict[str, str] = {
+        qp: dict[str, Any],
+    ) -> dict[str, Any]:
+        keys: dict[str, str] = {
             "deep": "bool_int",  # only 0 and 1 are valid
             "depth": "int",
             "listFolders": "bool_int",
@@ -443,7 +553,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
             "includeRootPath": "bool_int",
         }
 
-        qp_out: Dict[str, Any] = {}
+        qp_out: dict[str, Any] = {}
         for k, v in qp.items():
             if k not in keys:
                 continue
@@ -469,7 +579,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
 
     def search_prop_fail(
         self,
-        repo_list: List[str] | None = None,
+        repo_list: list[str] | None = None,
     ) -> Any:
         # GET https://alt-artifactory-dev/artifactory/api/search/
         #    prop?RL.scan-status=fail[&repos=my-release-candidates,docker-local]
@@ -493,7 +603,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
     def list_repo_items(
         self,
         repo: ArtifactoryRepoInfo,
-        qp: Dict[str, Any] | None = None,
+        qp: dict[str, Any] | None = None,
     ) -> Any:
         # GET /api/storage/{repoKey}/{folder-path}
         #   ?list[&deep=0/1][&depth=n][&listFolders=0/1][&mdTimestamps=0/1][&includeRootPath=0/1]
@@ -505,10 +615,10 @@ class ArtifactoryApi(ArtifactoryApiBase):
         for k, v in qp.items():
             z.append(f"{k}={v}")
         z_s = "&".join(z)
-        if len(z):
+        if z:
             z_s = "&" + z_s
 
-        url = f"{self.base_url}/api/storage/{repo.name}?list{z_s}"
+        url = f"{self.base_url}/api/storage/{self._storage_repo_name(repo)}?list{z_s}"
         r = self._request_get(url)
 
         if r.status_code < 200 or r.status_code >= 300:
@@ -518,30 +628,32 @@ class ArtifactoryApi(ArtifactoryApiBase):
 
         return r.json()
 
-    def list_file_info(
-        self,
-        file: FileInfo,
-    ) -> Any:
-        # GET /api/storage/{repoKey}/{filePath}
-        file_path = file.uri
-        url = f"{self.base_url}/api/storage/{file.repo.name}/{file_path}"
-        r = self._request_get(url)
-
-        if r.status_code < 200 or r.status_code >= 300:
-            return {}
-
-        return r.json()
-
     def get_repo_info(
         self,
         repo: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
+        """The configuration of one repository, or {} when we cannot read it.
+
+        An empty result is not the same as an empty configuration: it means the
+        repository does not exist, or we may not read it, or the request failed.
+
+        The caller reports the skip, so the status is logged here at **debug**
+        only: at warning it made one unreadable repository produce two warnings
+        saying the same thing. The status still tells a 404 from a 403 when you
+        need it, which is the reason to keep it at all.
+        """
         # GET /api/v2/repositories/{repoKey}
         url = f"{self.base_url}/api/v2/repositories/{repo}"
         r = self._request_get(url)
 
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         if r.status_code < 200 or r.status_code >= 300:
+            logger.debug(
+                "cannot read the configuration of repository '%s': status %s; %s",
+                repo,
+                r.status_code,
+                self._error_message(r),
+            )
             return result
 
         logger.debug("result: %s", r.text)
@@ -550,51 +662,116 @@ class ArtifactoryApi(ArtifactoryApiBase):
 
     # properties
 
-    def _get_item_properties_by_repo_name(
-        self,
-        repo_name: str,
-        item_uri: str,
-    ) -> Dict[str, Any]:
-        # GET /api/storage/{repoKey}/{itemPath}?properties[=x[,y]]
-        url = f"{self.base_url}/api/storage/{repo_name}{item_uri}?properties"
-        r = self._request_get(url)
-
-        result: Dict[str, Any] = {}
-        if r.status_code < 200 or r.status_code >= 300:
-            return result
-
-        result = r.json().get("properties", {})
-        return result
-
     def get_item_properties(
         self,
         file: FileInfo,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         # GET /api/storage/{repoKey}/{itemPath}?properties[=x[,y]]
-        url = f"{self.base_url}/api/storage/{file.repo.name}{file.uri}?properties"
+        url = f"{self.base_url}/api/storage/{self._storage_repo_name(file.repo)}{file.uri}?properties"
         r = self._request_get(url)
 
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         if r.status_code < 200 or r.status_code >= 300:
             return result
 
         result = r.json().get("properties", {})
         return result
 
-    def get_one_prop(
+    @staticmethod
+    def _storage_repo_name(
+        repo: ArtifactoryRepoInfo,
+    ) -> str:
+        """The canonical /api/storage name of a repository.
+
+        Only local repositories and the cache side of a remote one hold artifacts
+        and accept custom properties; a remote repository itself is not writable.
+
+        Reads through the bare remote name happen to work, because Artifactory
+        resolves it to the cache and even answers with the cache uri, but that
+        convenience is not part of the api contract. Every /api/storage call
+        therefore uses the canonical name.
+
+        This does NOT apply to the artifact download url, which is not an
+        /api/storage call: that one proxies through the bare remote name.
+        """
+        if repo.repo_type.lower() == "remote":
+            return repo.name + "-cache"
+        return repo.name
+
+    @staticmethod
+    def _error_message(
+        r: Any,
+    ) -> str:
+        """The message out of Artifactory's ErrorResponse, if it sent one."""
+        try:
+            errors = r.json().get("errors", [])
+        except ValueError:
+            return ""
+
+        if not isinstance(errors, list):
+            return ""
+
+        return "; ".join(str(e.get("message", "")) for e in errors if isinstance(e, dict))
+
+    @staticmethod
+    def _recursive_limit_from(
+        message: str,
+    ) -> str | None:
+        """The item limit named in a 'more than <n> items' refusal, if that is what this is."""
+        m = re.search(RECURSIVE_PROPS_LIMIT_PATTERN, message, re.IGNORECASE | re.DOTALL)
+        if m is None:
+            return None
+        return m.group(1)
+
+    def _put_props_once(
+        self,
+        repo_name: str,
+        item_uri: str,
+        key: str,
+        value: str,
+        recursive: bool,
+    ) -> Any:
+        url = f"{self.base_url}/api/storage/{repo_name}{item_uri}"
+
+        params: dict[str, Any] = {
+            "properties": f"{key}={value}",
+            "recursive": int(recursive),
+        }
+
+        return self._request_put(
+            url=url,
+            params=params,
+        )
+
+    def list_items_below(
         self,
         repo: ArtifactoryRepoInfo,
         item_uri: str,
-        key: str,
-    ) -> Any:
-        # GET /api/storage/{repoKey}/{itemPath}?properties[=x[,y]]
+    ) -> list[str]:
+        """Every file below item_uri, as uris relative to the repository root."""
+        repo_name = self._storage_repo_name(repo)
+        url = f"{self.base_url}/api/storage/{repo_name}{item_uri}?list&deep=1&listFolders=0"
 
-        url = f"{self.base_url}/api/storage/{repo.name}{item_uri}?properties={key}"
         r = self._request_get(url)
         if r.status_code < 200 or r.status_code >= 300:
-            return None
-        result = r.json().get("properties", {})
-        return result
+            logger.error("cannot list %s%s: %s", repo_name, item_uri, r.status_code)
+            return []
+
+        files = r.json().get("files", [])
+        if not isinstance(files, list):
+            return []
+
+        out: list[str] = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            if item.get("folder"):
+                continue
+            uri = item.get("uri")
+            if uri:
+                out.append(f"{item_uri}{uri}")
+
+        return out
 
     def put_one_prop(
         self,
@@ -609,23 +786,134 @@ class ArtifactoryApi(ArtifactoryApiBase):
         logger.debug("%s; %s: %s", item_uri, key, value)
 
         # value = quote(value, safe="/@=")
-        repo_name = repo.name
-        if repo.repo_type.lower() == "remote":
-            repo_name = repo.name + "-cache"
+        repo_name = self._storage_repo_name(repo)
 
-        url = f"{self.base_url}/api/storage/{repo_name}{item_uri}"
-
-        params: Dict[str, Any] = {
-            "properties": f"{key}={value}",
-            "recursive": int(recursive),
-        }
-
-        r = self._request_put(
-            url=url,
-            params=params,
+        r = self._put_props_once(
+            repo_name=repo_name,
+            item_uri=item_uri,
+            key=key,
+            value=value,
+            recursive=recursive,
         )
-        if r.status_code < 200 or r.status_code >= 300:
+        if 200 <= r.status_code < 300:
+            return True
+
+        message = self._error_message(r)
+        logger.error(
+            "set property failed: %s%s; %s=%s; recursive=%s; status %s; %s",
+            repo_name,
+            item_uri,
+            key,
+            value,
+            recursive,
+            r.status_code,
+            message,
+        )
+
+        if self._should_retry_per_item(recursive=recursive, status=r.status_code, message=message) is False:
             return False
+
+        return self._put_one_prop_per_item(
+            repo=repo,
+            repo_name=repo_name,
+            item_uri=item_uri,
+            key=key,
+            value=value,
+        )
+
+    def _should_retry_per_item(
+        self,
+        recursive: bool,
+        status: int,
+        message: str,
+    ) -> bool:
+        """Is this refusal one that splitting into single items could get past?
+
+        Only a recursive call, and only on the status the cap arrives as. 401, 403
+        and 404 mean credentials, permissions or a missing item, and splitting
+        cannot help with any of those.
+        """
+        if not recursive or status != RECURSIVE_PROPS_RETRY_STATUS:
+            return False
+
+        limit = self._recursive_limit_from(message)
+        if limit is not None:
+            logger.warning("the server caps recursive property updates at %s item(s)", limit)
+            return True
+
+        # retry anyway: the wording is not part of the api contract, and a 400 we
+        # do not recognise is more likely a reworded cap than a malformed value
+        logger.warning(
+            "unrecognised 400 on a recursive property update, retrying per item: %s",
+            message,
+        )
+        return True
+
+    def _put_one_prop_per_item(
+        self,
+        repo: ArtifactoryRepoInfo,
+        repo_name: str,
+        item_uri: str,
+        key: str,
+        value: str,
+    ) -> bool:
+        """Fall back from one recursive update to one update per item below item_uri.
+
+        A recursive update can be refused because the server caps how many artifacts
+        it may touch at once (artifactory.max.artifacts.set.properties.recursive,
+        since 7.104.x). The api has no dedicated status for that, so this runs on any
+        400 from a recursive call; when the 400 was really a malformed properties
+        value the per item calls fail too, and the log says so for each.
+
+        Setting a property is idempotent, so items the refused call had already
+        updated are simply set to the same value again.
+        """
+        items = self.list_items_below(repo=repo, item_uri=item_uri)
+        if not items:
+            logger.error("no items below %s%s to update one by one", repo_name, item_uri)
+            return False
+
+        logger.warning(
+            "recursive set property refused for %s%s; retrying %d item(s) one by one",
+            repo_name,
+            item_uri,
+            len(items),
+        )
+
+        failed: list[str] = []
+        for uri in items:
+            r = self._put_props_once(
+                repo_name=repo_name,
+                item_uri=uri,
+                key=key,
+                value=value,
+                recursive=False,
+            )
+            if 200 <= r.status_code < 300:
+                continue
+
+            failed.append(uri)
+            logger.error(
+                "set property failed: %s%s; %s=%s; status %s; %s",
+                repo_name,
+                uri,
+                key,
+                value,
+                r.status_code,
+                self._error_message(r),
+            )
+
+        if failed:
+            logger.error(
+                "%d of %d item(s) below %s%s could not be updated",
+                len(failed),
+                len(items),
+                repo_name,
+                item_uri,
+            )
+            return False
+
+        logger.info("updated %d item(s) below %s%s one by one", len(items), repo_name, item_uri)
         return True
 
     def del_one_prop(
@@ -638,9 +926,7 @@ class ArtifactoryApi(ArtifactoryApiBase):
         # DELETE /api/storage/libs-release-local/ch/qos/logback/logback-classic/0.9.9?properties=os,qa&recursive=0
         logger.debug("del prop %s:%s %s %s", repo.name, item_uri, key, recursive)
 
-        repo_name = repo.name
-        if repo.repo_type.lower() == "remote":
-            repo_name = repo.name + "-cache"
+        repo_name = self._storage_repo_name(repo)
 
         params = {
             "properties": key,
@@ -652,8 +938,85 @@ class ArtifactoryApi(ArtifactoryApiBase):
             url,
             params=params,
         )
-        if r.status_code < 200 or r.status_code >= 300:
+        if 200 <= r.status_code < 300:
+            return True
+
+        message = self._error_message(r)
+        logger.error(
+            "delete property failed: %s%s; %s; recursive=%s; status %s; %s",
+            repo_name,
+            item_uri,
+            key,
+            recursive,
+            r.status_code,
+            message,
+        )
+
+        if self._should_retry_per_item(recursive=recursive, status=r.status_code, message=message) is False:
             return False
+
+        return self._del_one_prop_per_item(
+            repo=repo,
+            repo_name=repo_name,
+            item_uri=item_uri,
+            key=key,
+        )
+
+    def _del_one_prop_per_item(
+        self,
+        repo: ArtifactoryRepoInfo,
+        repo_name: str,
+        item_uri: str,
+        key: str,
+    ) -> bool:
+        """Fall back from one recursive delete to one delete per item below item_uri.
+
+        The cap of R11.4.3 applies to deleting properties as it does to setting
+        them, and the refusal reads the same way. Deleting a property that is not
+        there is not an error, so items the refused call had already handled cost
+        nothing on the retry.
+        """
+        items = self.list_items_below(repo=repo, item_uri=item_uri)
+        if not items:
+            logger.error("no items below %s%s to delete from one by one", repo_name, item_uri)
+            return False
+
+        logger.warning(
+            "recursive delete property refused for %s%s; retrying %d item(s) one by one",
+            repo_name,
+            item_uri,
+            len(items),
+        )
+
+        failed: list[str] = []
+        for uri in items:
+            url = f"{self.base_url}/api/storage/{repo_name}{uri}"
+            r = self._request_del(url, params={"properties": key, "recursive": 0})
+            if 200 <= r.status_code < 300:
+                continue
+
+            failed.append(uri)
+            logger.error(
+                "delete property failed: %s%s; %s; status %s; %s",
+                repo_name,
+                uri,
+                key,
+                r.status_code,
+                self._error_message(r),
+            )
+
+        if failed:
+            logger.error(
+                "%d of %d item(s) below %s%s could not have %s deleted",
+                len(failed),
+                len(items),
+                repo_name,
+                item_uri,
+                key,
+            )
+            return False
+
+        logger.info("deleted %s from %d item(s) below %s%s one by one", key, len(items), repo_name, item_uri)
         return True
 
     def set_one_prop(
@@ -686,11 +1049,11 @@ class ArtifactoryApi(ArtifactoryApiBase):
 
         repo_name = file.repo.name
         if file.repo.repo_type.lower() == "remote":
-            repo_name = file.repo.name + "-cache"
+            repo_name = self._storage_repo_name(file.repo)
 
         url = f"{self.base_url}/ui/views/rpm"
-        headers: Dict[str, Any] = {"Content-type": "application/json"}
-        data: Dict[str, Any] = {
+        headers: dict[str, Any] = {"Content-type": "application/json"}
+        data: dict[str, Any] = {
             "view": "rpm",
             "repoKey": repo_name,
             "path": file.uri,
@@ -707,34 +1070,12 @@ class ArtifactoryApi(ArtifactoryApiBase):
             return False
         return True
 
-    def get_tags_docker(
-        self,
-        file: FileInfo,
-    ) -> Any:
-        # https://jfrog.com/help/r/jfrog-rest-apis/list-docker-repositories
-        # GET /api/docker/{repo-key}/v2/{image name}/tags/list
-        #   ?n=<Number of consecutive tags>&
-        #   last=<last tag position (numeric) from previous response>
-        logger.debug("uri: %s", file.uri)
-
-        repo_key = "docker"
-        image_name = "reversinglabs/rl-scanner:latest"
-        url = f"{self.base_url}/api/docker/{repo_key}/v2/{image_name}/tags/list"
-
-        r = self._request_get(url)
-        if r.status_code < 200 or r.status_code >= 300:
-            return None
-
-        logger.debug("result: %s", r.json())
-
-        return r.json()
-
     def upload_file_to_artifactory(
         self,
         file_path: str,
         repo_name: str,
         uri_path: str,
-    ) -> Tuple[int, str, str]:
+    ) -> tuple[int, str, str]:
         url = f"{self.base_url}/{repo_name}{uri_path}"
         logger.debug(url)
         response = self._request_put_upload_file(

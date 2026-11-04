@@ -1,6 +1,5 @@
 # python3 ts=4space
 import logging
-
 from dataclasses import (
     dataclass,
     field,
@@ -39,5 +38,5 @@ class FileInfo:
                 str(self.properties),
                 str(self.simple),
                 self.file_name,
-            ]
+            ],
         )

@@ -1,18 +1,16 @@
 #! /usr/bin/env python3
 
-from typing import (
-    Tuple,
-    List,
-)
-
-import os
 import logging
+import os
+import pathlib
+
+from rl_scan_artifactory.constants import (
+    DOCKER_SCAN_ANSWER_CODES,
+)
 
 from .scan_cli_base import ScanCliBase
 
 logger: logging.Logger = logging.getLogger(__name__)
-
-# temp_dir
 
 
 class ScanCliDocker(
@@ -28,12 +26,13 @@ class ScanCliDocker(
 
     def __init__(
         self,
+        *,
         purl: str,
         encoded_license: str,
         site_key: str,
         store: str | None = None,
-        temp_dir_path: str | None = None,  # you handle temp_dir yourself, must be empy
-        reports_list: List[str] | None = None,
+        temp_dir_path: str,  # owned and removed by the caller, must be empty
+        reports_list: list[str] | None = None,
     ) -> None:
         # later: add rl-store external to docker
 
@@ -52,23 +51,18 @@ class ScanCliDocker(
             self.user_id = os.getuid()
             self.group_id: int = -1
             self.group_id = os.getgid()
-        except Exception as e:
-            logger.exception("Only on unix platforms %s", e)
-            # alternativly fail and say Unix only
-
-    def set_docker_image_name(
-        self,
-        docker_image_name: str,
-    ) -> None:
-        self.docker_image_name: str = docker_image_name
+        except Exception:
+            logger.exception("Only on unix platforms")
+            # alternatively fail and say Unix only
 
     def _do_docker_rl_scan(
         self,
+        *,
         file_path: str,
         with_pack_safe: bool = False,
     ) -> int:
-        realdir_packages = os.path.dirname(file_path)
-        file_name = os.path.basename(file_path)
+        realdir_packages = pathlib.Path(file_path).parent
+        file_name = pathlib.Path(file_path).name
 
         # no --rm as we will most likely use the docker image multiple times
         # currently no external rl-store so no sync possible
@@ -80,8 +74,10 @@ class ScanCliDocker(
             "--rm",
             f"--volume={realdir_packages}:/packages:ro",
             f"--volume={self.temp_dir_path}:/report",
-            f"--env=RLSECURE_ENCODED_LICENSE={self.RLSECURE_ENCODED_LICENSE}",
-            f"--env=RLSECURE_SITE_KEY={self.RLSECURE_SITE_KEY}",
+            # no '=value' here: docker takes the value from our own environment,
+            # so the license never becomes an argv element visible in ps
+            "--env=RLSECURE_ENCODED_LICENSE",
+            "--env=RLSECURE_SITE_KEY",
         ]
 
         if self.store is not None:
@@ -111,24 +107,37 @@ class ScanCliDocker(
             )
 
         command = command1 + command2
+        # the image answers with the verdict, so a 'fail' is an answer here, not a
+        # failure of the command
         return self._do_command(
             what="docker_rl_scan",
             command=command,
+            secrets=self._license_environment(),
+            answer_codes=DOCKER_SCAN_ANSWER_CODES,
         )
+
+    def _license_environment(
+        self,
+    ) -> dict[str, str]:
+        """The values the two --env flags above tell docker to pick up."""
+        return {
+            "RLSECURE_ENCODED_LICENSE": self.RLSECURE_ENCODED_LICENSE,
+            "RLSECURE_SITE_KEY": self.RLSECURE_SITE_KEY,
+        }
 
     def _do_docker_rl_sync(
         self,
+        *,
         with_pack_safe: bool = False,
     ) -> int:
-        # option force to force a download # TODO
         command1 = [
             "docker",
             "run",
             "--rm",
-            "--pull allways",
+            "--pull=always",
             f"--volume={self.temp_dir_path}:/report",
-            f"--env=RLSECURE_ENCODED_LICENSE={self.RLSECURE_ENCODED_LICENSE}",
-            f"--env=RLSECURE_SITE_KEY={self.RLSECURE_SITE_KEY}",
+            "--env=RLSECURE_ENCODED_LICENSE",
+            "--env=RLSECURE_SITE_KEY",
         ]
 
         if self.store is not None:
@@ -158,24 +167,34 @@ class ScanCliDocker(
         command = command1 + command2
 
         return self._do_command(
-            what="docker_rl_scan",
+            what="docker_rl_sync",
             command=command,
+            secrets=self._license_environment(),
+            answer_codes=DOCKER_SCAN_ANSWER_CODES,
         )
 
     def do_scan_and_report(
         self,
+        *,
         file_path: str,
         with_pack_safe: bool = False,
-    ) -> Tuple[int, str, str | None]:
+    ) -> tuple[int, str, str | None]:
         f_real_path = os.path.realpath(file_path)
-        assert os.path.exists(f_real_path), f"path must exist: {f_real_path}"
-        assert os.path.isfile(f_real_path), f"path is not a file {f_real_path}"
+
+        if not pathlib.Path(f_real_path).exists():
+            msg = f"path must exist: {f_real_path}"
+            raise ValueError(msg)
+
+        if not pathlib.Path(f_real_path).is_file():
+            msg = f"path is not a file {f_real_path}"
+            raise ValueError(msg)
 
         self.scan_status = self._do_docker_rl_scan(
             file_path=f_real_path,
             with_pack_safe=with_pack_safe,
         )
-        if self.scan_status not in [0, 1]:
+
+        if self.scan_status not in {0, 1}:
             return self.scan_status, "", None
 
         self.make_reports_bundle()
@@ -185,14 +204,16 @@ class ScanCliDocker(
 
     def do_sync_and_report(
         self,
+        *,
         with_pack_safe: bool = False,
-    ) -> Tuple[int, str, str | None]:
-        assert False, "sync currently not implemented"
+    ) -> tuple[int, str, str | None]:
+        msg = "sync currently not implemented"
+        raise RuntimeError(msg)
 
         self.scan_status = self._do_docker_rl_sync(
             with_pack_safe=with_pack_safe,
         )
-        if self.scan_status not in [0, 1]:
+        if self.scan_status not in {0, 1}:
             return self.scan_status, "", None
 
         self.make_reports_bundle()

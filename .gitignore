@@ -166,3 +166,7 @@ cython_debug/
 tmp/
 tmp2/
 vtmp/
+*.zip
+
+# tools/verify_rebuild.sh: scanner logs of each verification run
+verify-rebuild/

@@ -1,12 +1,12 @@
 # python3 ts=4space
 import logging
 from typing import (
-    Dict,
     Any,
 )
 
+from rl_scan_artifactory.fileinfo import FileInfo
+
 from .simple_data_common import SimpleDataCommon
-from ..fileinfo import FileInfo
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ e.g.
     The architecture is not in the manifest.json. but in the build layer or in the list.manifest.json (if it exists).
     Image layer files may actually not even be downloadable if they are .marker (dedup),
       they may be located elsewhere as they are shared between images,
-      or in worst case may not be downloadable at all if a image was deleted that has the ream layer.
+      or in worst case may not be downloadable at all if a image was deleted that has the real layer.
       (possibly via the storage layer it may be downloadable)
 
 Some package format have a different name on the repo level then the file extension:
@@ -53,6 +53,6 @@ class SimpleDataDefault(SimpleDataCommon):
 
     def make_simple_data(
         self,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         logger.debug("repository type: %s, file: %s", self.p_type, self.uri)
         return self._make_simple_data_from_props_artifactory_basic()

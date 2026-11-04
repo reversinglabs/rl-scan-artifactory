@@ -4,25 +4,34 @@ import logging
 import time
 from typing import (
     Any,
-    Dict,
-    Tuple,
 )
 
-from .artifactory_file_processor_common import ArtifactoryFileProcessorCommon
 from ..artifactory_api import ArtifactoryApi
 from ..artifactory_repo_info import ArtifactoryRepoInfo
 from ..constants import (
-    PROCESS_FILE_SKIP,
-    META_STRING,
+    DERIVED_PROPERTY_INFIX,
+    FUTURE_GENERIC_PURL_ESCAPE,
+    FUTURE_GENERIC_PURL_SEPARATOR,
     META_SECTION_KEY,
-)
-from ..constants import (
-    SCAN_STATUS_WAIT_TIME,
-    PROCESS_FILE_UPDATED,
+    META_STRING,
+    PROCESS_FILE_SKIP,
     PROCESS_FILE_TIMEOUT,
+    PROCESS_FILE_UPDATED,
+    PROGRESS_ALL,
+    PROGRESS_SCANNED,
+    PROGRESS_UPLOADED,
+    PROP_NAME_SPECTRA_ASSURE_TIMESTAMP,
+    PROP_SPECTRA_ASSURE_ON_SIDE_CAR,
+    REPO_DB_DESCRIBED_BY_SIDE_CAR,
+    SCAN_STATUS_WAIT_TIME,
 )
-from ..exceptions import SpectraAssureInvalidAction
+from ..exceptions import (
+    SpectraAssureInvalidAction,
+    SpectraAssureInvariantError,
+)
+from ..name_mangler.name_mangler_common import NameManglerCommon
 from ..spectra_assure_api import SpectraAssureApi
+from .artifactory_file_processor_common import ArtifactoryFileProcessorCommon
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +65,19 @@ class ArtifactoryFileProcessorGeneric(
         "path",
     ]
 
-    derived = "_derived_"
+    derived = DERIVED_PROPERTY_INFIX
     rl_meta = META_SECTION_KEY
     what = "generic"
 
     def __init__(
         self,
         *,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
         spectra_assure_api: SpectraAssureApi | None,
         artifactory_api: ArtifactoryApi,
         repo: ArtifactoryRepoInfo,
-        artifact_item: Dict[str, Any],
-        repo_db: Dict[str, Any],  # pass infor between file processing; docker list.manifest.json currently
+        artifact_item: dict[str, Any],
+        repo_db: dict[str, Any],  # pass info between file processing; docker list.manifest.json currently
     ) -> None:
         super().__init__(
             cli_args=cli_args,
@@ -81,8 +90,20 @@ class ArtifactoryFileProcessorGeneric(
 
     @staticmethod
     def _escape_string_for_spectra_assure_purl_component(
-        string: str,
+        string: str | None,
     ) -> str:
+        """Make one purl component safe; an absent optional field is an empty component.
+
+        Two schemes, see FUTURE_GENERIC_PURL_ESCAPE in constants.py. The new one
+        calls the name manglers' escaper rather than repeating it, so the two can
+        no longer drift apart once the flag is on.
+        """
+        if string is None:
+            return ""
+
+        if FUTURE_GENERIC_PURL_ESCAPE:
+            return NameManglerCommon._escape_string_for_spectra_assure_purl_component(string)
+
         trans = {
             "@": "40",
             "/": "2F",
@@ -93,29 +114,62 @@ class ArtifactoryFileProcessorGeneric(
 
         return string
 
+    @staticmethod
+    def _purl_separator() -> str:
+        """'-' today, '_' as the name manglers use; see FUTURE_GENERIC_PURL_SEPARATOR."""
+        if FUTURE_GENERIC_PURL_SEPARATOR:
+            return "_"
+        return "-"
+
+    def _derived_property(
+        self,
+        key: str,
+    ) -> str | None:
+        """One derived property as a scalar.
+
+        The properties themselves are list[str] like every other property (R3.1),
+        so every reader has to unwrap; doing it here keeps that in one place.
+        """
+        values = self.file.properties.get(f"{self.what}.{self.derived}.{key}")
+        if not values:
+            return None
+
+        value: str = values[0]
+        return value
+
     def _make_meta_dict(
         self,
         config: Any,
-    ) -> Dict[str, str | None]:
-        meta: Dict[str, str | None] = {}
+    ) -> dict[str, str | None]:
+        """Read the side-car section, and mirror it into the derived properties.
+
+        The meta dict keeps every field, absent ones as None, because
+        _verify_mandatory has to tell 'missing' from 'empty'. The properties do
+        not: their values are list[str] like every other property in this
+        codebase, and a field the side-car did not supply gets no property at
+        all rather than a None or an empty list.
+        """
+        meta: dict[str, str | None] = {}
 
         for n in self.rl_meta_fields:
-            meta[n] = config[self.rl_meta].get(n)
+            value = config[self.rl_meta].get(n)
+            meta[n] = value
 
-            k = n
-            if n == "architecture":
-                k = "arch"
+            k = "arch" if n == "architecture" else n
+            key = f"{self.what}.{self.derived}.{k}"
 
-            k = f"{self.what}.{self.derived}.{k}"
-            v = meta[n]
-            self.file.properties[k] = v
+            if value is None:
+                self.file.properties.pop(key, None)
+                continue
+
+            self.file.properties[key] = [value]
 
         logger.debug("%s", meta)
         return meta
 
     def _verify_mandatory(
         self,
-        meta: Dict[str, Any],
+        meta: dict[str, Any],
     ) -> None:
         crit = False
         for n in self.rl_meta_mandatory:
@@ -129,15 +183,17 @@ class ArtifactoryFileProcessorGeneric(
 
     def _set_purl_data(
         self,
-        meta: Dict[str, Any],
+        meta: dict[str, Any],
     ) -> None:
+        sep = self._purl_separator()
+
         # -- project --
         self.purl_info.project = self.repo.name
         k = "architecture"
         z = self._escape_string_for_spectra_assure_purl_component(meta[k])
 
         if z is not None and len(z) > 0:
-            self.purl_info.project = f"{self.repo.name}-{z}"
+            self.purl_info.project = f"{self.repo.name}{sep}{z}"
 
         # -- package --
         name = self._escape_string_for_spectra_assure_purl_component(meta["name"])
@@ -145,33 +201,43 @@ class ArtifactoryFileProcessorGeneric(
         k = "namespace"
         z = self._escape_string_for_spectra_assure_purl_component(meta[k])
         if z is not None and len(z) > 0:
-            self.purl_info.package = f"{z}-{name}"
+            self.purl_info.package = f"{z}{sep}{name}"
 
         # -- version --
         self.purl_info.version = self._escape_string_for_spectra_assure_purl_component(meta["version"])
 
     def _load_meta_info(
         self,
-    ) -> Tuple[bool, Any]:
-        """Download the meta file and extract ist info"""
+    ) -> tuple[bool, Any]:
+        """Download the meta file and extract its info"""
         is_downloaded = False
 
         aa = self.uri.split("/")
         target_name = aa[-1]
-        assert target_name is not None
+        if target_name is None:
+            msg = "expected target_name is not None"
+            raise SpectraAssureInvariantError(msg)
         download_path, verify_ok = self._do_one_artifactory_download(
             target_name=target_name,
         )
 
         if download_path is None:
-            logger.error("download failed file for: %s", download_path)
+            logger.error("download failed for: %s", self.uri)
             return is_downloaded, None
 
-        config = configparser.ConfigParser()
+        if verify_ok is False:
+            logger.error("download digest mismatch for: %s", self.uri)
+            self._remove_files([download_path])
+            return is_downloaded, None
+
+        # interpolation=None: a side-car is data, not a template. With the default
+        # BasicInterpolation a '%' in any value raises InterpolationSyntaxError, so
+        # a name or version containing one could not be described at all.
+        config = configparser.ConfigParser(interpolation=None)
         config.read(download_path)
 
         if self.rl_meta not in config:
-            logger.error("missing %s in meta file", self.rl_meta, download_path)
+            logger.error("missing %s in meta file: %s", self.rl_meta, download_path)
             return is_downloaded, None
 
         meta = self._make_meta_dict(config=config)
@@ -185,7 +251,7 @@ class ArtifactoryFileProcessorGeneric(
         self,
         scan_status: str | None,
         report: str | None = None,
-        progress: str = "scanned",
+        progress: str = PROGRESS_SCANNED,
     ) -> None:
         logger.debug("%s", report)
         if report is not None and self.what_backend == "portal":
@@ -193,33 +259,139 @@ class ArtifactoryFileProcessorGeneric(
             report = f"{base}/{report}"
         logger.debug("%s", report)
 
-        uri = self.uri
+        # The .rl_meta side-car is how a generic artifact is found, never what is
+        # scanned: the scan is of the file its 'path' names, so the full result
+        # belongs on that file. The side-car keeps only enough to say it was
+        # handled and when, which is what a later run reads to skip it.
+        described = self._described_file_uri()
+
         self.set_props_all(
             report=report,
             progress=progress,
             scan_status=scan_status,
             recursive=False,
-            uri=uri,
+            uri=described if described is not None else self.uri,
         )
 
-        if self.cli_args.get("portal"):
-            aa = uri.split("/")
-            aa[-1] = self.file.properties[f"{self.what}.{self.derived}.path"]
-            uri2 = "/".join(aa)
+        if described is None:
+            self._stamp_the_side_car_of_a_cli_scan(progress=progress)
+            return
 
-            self.set_props_all(
-                report=report,
-                progress=progress,
-                scan_status=scan_status,
-                recursive=False,
-                uri=uri2,
-            )
+        self.set_props_all(
+            report=report,
+            progress=progress,
+            scan_status=scan_status,
+            recursive=False,
+            uri=self.uri,
+            only=PROP_SPECTRA_ASSURE_ON_SIDE_CAR,
+        )
+
+    def _stamp_the_side_car_of_a_cli_scan(
+        self,
+        *,
+        progress: str,
+    ) -> None:
+        """A cli scan or sync also updates RL.timestamp on the side-car (R7.10.1).
+
+        Only that one: RL.progress and RL.sha256 there are a portal run's, which
+        reads them to decide whether to skip, so they are left as they are.
+        """
+        if self.cli_args.get("portal"):
+            return
+
+        side_car = self._side_car_uri()
+        if side_car is None:
+            return
+
+        self.set_props_all(
+            report=None,
+            progress=progress,
+            scan_status=None,
+            recursive=False,
+            uri=side_car,
+            only=(PROP_NAME_SPECTRA_ASSURE_TIMESTAMP,),
+        )
+
+    def _side_car_uri(
+        self,
+    ) -> str | None:
+        """The side-car describing this file, from the generic pre pass, or None."""
+        described_by: dict[str, str] = self.repo_db.get(REPO_DB_DESCRIBED_BY_SIDE_CAR, {})
+        for side_car, described in described_by.items():
+            if described == self.uri:
+                return side_car
+
+        return None
+
+    def _described_file_uri(
+        self,
+    ) -> str | None:
+        """The uri of the file the side-car describes, or None when there is none.
+
+        Portal only: a cli run has no side-car, so self.uri is already the
+        artifact.
+        """
+        if not self.cli_args.get("portal"):
+            return None
+
+        path = self._derived_property("path")
+        if path is None:
+            # the side-car is not read yet when the properties decide whether to
+            # read it at all; the pre pass has read it already
+            described: str | None = self.repo_db.get(REPO_DB_DESCRIBED_BY_SIDE_CAR, {}).get(self.uri)
+            return described
+
+        aa = self.uri.split("/")
+        aa[-1] = path
+        return "/".join(aa)
+
+    def _maintained_properties(self) -> tuple[str, ...]:
+        """A side-car keeps only what says it was handled (R7.10); 1.0.4 wrote the full set.
+
+        A cli run scans the files themselves and never writes on a side-car, but a
+        portal run on the same repo does, so a side-car is one in either mode.
+        """
+        if not self.uri.lower().endswith(META_STRING):
+            return super()._maintained_properties()
+
+        return PROP_SPECTRA_ASSURE_ON_SIDE_CAR
+
+    def _scanned_sha256(self) -> str | None:
+        """The hash of the file the side-car describes: that is what is scanned.
+
+        A cli run has no side-car, so there self.file is the artifact itself.
+        """
+        if not self.cli_args.get("portal"):
+            return super()._scanned_sha256()
+
+        sha2 = self._described_file_sha2()
+        return sha2.lower() if sha2 else None
+
+    def _described_file_sha2(
+        self,
+    ) -> str | None:
+        """The sha256 Artifactory holds for the file the side-car describes.
+
+        Not self.file.sha2, that is the hash of the side-car. The generic pre pass
+        keeps the described file's hash from the repository listing in repo_db.
+        None when the pre pass did not see it, which compares nothing.
+        """
+        described = self._described_file_uri()
+        if described is None:
+            return None
+
+        sha2: str | None = self.repo_db.get(described, {}).get("sha2")
+        return sha2
 
     def _wait_for_scan_status_one_portal(
         self,
     ) -> bool:
-        assert self.max_time > 0
-        assert self.what_backend == "portal"
+        if self.max_time <= 0:
+            msg = "expected self.max_time > 0"
+            raise SpectraAssureInvariantError(msg)
+        if self.what_backend != "portal":
+            msg = "expected self.what_backend == 'portal'"
+            raise SpectraAssureInvariantError(msg)
 
         purl = self.purl_info.make_purl()
         time.sleep(1)
@@ -227,7 +399,7 @@ class ArtifactoryFileProcessorGeneric(
 
         n = 0
         while n < self.max_time:
-            scan_status, report = self._get_purl_scan_status_one()
+            scan_status, report, _status_code = self._get_purl_scan_status_one()
             if scan_status is not None:
                 break
 
@@ -237,7 +409,7 @@ class ArtifactoryFileProcessorGeneric(
 
         completed = False
         if scan_status is None:
-            logger.warning("timout reached: no scan status for: '%s'", self.purl_info.make_purl())
+            logger.warning("timeout reached: no scan status for: '%s'", self.purl_info.make_purl())
 
             self.processing_info.completed = completed
             self.processing_info.status = PROCESS_FILE_TIMEOUT
@@ -246,14 +418,15 @@ class ArtifactoryFileProcessorGeneric(
             self.processing_info.purl = purl
             return completed
 
-        assert report is not None
+        if report is None:
+            msg = "expected report is not None"
+            raise SpectraAssureInvariantError(msg)
 
         completed = True
         self._update_artifactory_item_with_scan_status(
             scan_status=scan_status,
             report=report,
         )
-        self.steps["artifactory_properties_exists"] = True
 
         self.processing_info.completed = completed
         self.processing_info.status = PROCESS_FILE_UPDATED
@@ -261,7 +434,6 @@ class ArtifactoryFileProcessorGeneric(
         self.processing_info.report = report
         self.processing_info.purl = purl
 
-        self.steps["portal_scan_complete"] = True
         return completed
 
     def make_new_uri_from_file_name(
@@ -278,21 +450,25 @@ class ArtifactoryFileProcessorGeneric(
         package: str,
         version: str,
     ) -> Any:
-        assert self.what_backend == "portal"
+        if self.what_backend != "portal":
+            msg = "expected self.what_backend == 'portal'"
+            raise SpectraAssureInvariantError(msg)
 
         is_uploaded = False
-        self.steps["portal_upload_ok"] = False
-        self.steps["portal_scan_complete"] = False
         self.processing_info.scan_state = None
         self.processing_info.purl = None
         self.processing_info.report = None
 
-        # download the file
-        file_name = self.file.properties[f"{self.what}.{self.derived}.path"]
-        k = f"{self.what}.{self.derived}.sha256"
-        sha256 = None
-        if self.file.properties.get(k):
-            sha256 = self.file.properties[k]
+        # download the file the side-car describes
+        file_name = self._derived_property("path")
+        if file_name is None:
+            self.processing_info.completed = True
+            self.processing_info.status = PROCESS_FILE_SKIP
+            self.processing_info.reason = f"skip: no 'path' in the {META_STRING} file"
+            logger.error("no 'path' in the %s of %s", META_STRING, self.uri)
+            return is_uploaded
+
+        sha256 = self._derived_property("sha256")
 
         new_uri = self.make_new_uri_from_file_name(file_name=file_name)
         target_path = "/".join([self.download_dir, file_name])
@@ -312,7 +488,21 @@ class ArtifactoryFileProcessorGeneric(
             self.processing_info.purl = None
             return is_uploaded
 
-        assert download_path is not None
+        if verify_ok is False:
+            logger.error("download digest mismatch for: %s", self.file)
+
+            self._remove_files([download_path])
+            self.processing_info.completed = True
+            self.processing_info.status = PROCESS_FILE_SKIP
+            self.processing_info.reason = "skip: download digest mismatch"
+            self.processing_info.scan_state = None
+            self.processing_info.report = None
+            self.processing_info.purl = None
+            return is_uploaded
+
+        if download_path is None:
+            msg = "expected download_path is not None"
+            raise SpectraAssureInvariantError(msg)
         # upload the file
         is_uploaded = self._do_one_portal_upload(
             project=project,
@@ -320,24 +510,21 @@ class ArtifactoryFileProcessorGeneric(
             version=version,
             file_path=download_path,
         )
-        self._remove_files([download_path])
         if is_uploaded is False:
             self.processing_info.completed = True
             self.processing_info.reason = "upload to portal failed"
             self.processing_info.status = PROCESS_FILE_SKIP
             return is_uploaded
 
-        self.steps["portal_upload_ok"] = True
         self.set_props_all(
             report=None,
-            progress="upload_to_portal_ok",
+            progress=PROGRESS_UPLOADED,
             scan_status=None,
             recursive=False,
             uri=self.make_new_uri_from_file_name(
                 file_name=file_name,
             ),
         )
-        self.steps["artifactory_properties_exists"] = True
         return is_uploaded
 
     def _process_portal(
@@ -346,7 +533,9 @@ class ArtifactoryFileProcessorGeneric(
         package: str,
         version: str,
     ) -> bool:
-        assert self.what_backend == "portal"
+        if self.what_backend != "portal":
+            msg = "expected self.what_backend == 'portal'"
+            raise SpectraAssureInvariantError(msg)
 
         is_uploaded = False
         purl = self.purl_info.make_purl()
@@ -356,13 +545,12 @@ class ArtifactoryFileProcessorGeneric(
             project=project,
             package=package,
             version=version,
-            digest=None,
+            digest=self._described_file_sha2(),
         )
         logger.debug("scan status: %s", scan_status)
 
         if exists_on_portal is True:
             is_uploaded = True
-            self.steps["portal_upload_ok"] = True
             self.processing_info.reason = "purl exists on portal"
 
             if sync_requested is False:
@@ -372,7 +560,6 @@ class ArtifactoryFileProcessorGeneric(
                     self.processing_info.purl = purl
                     self.processing_info.report = report
                     self.processing_info.completed = True
-                    self.steps["portal_scan_complete"] = True
                     return True
             else:
                 self.processing_info.reason = "portal-sync"
@@ -384,7 +571,6 @@ class ArtifactoryFileProcessorGeneric(
                     self.processing_info.status = PROCESS_FILE_SKIP
                     self.processing_info.scan_state = None
                     self.processing_info.report = None
-                    self.steps["artifactory_properties_exists"] = False
                     return True
         else:
             is_uploaded = self._portal_download_upload_generic(
@@ -395,64 +581,36 @@ class ArtifactoryFileProcessorGeneric(
             if is_uploaded is False:
                 return True
 
-        return self._wait_for_scan_status_one_portal()
+        return bool(self._wait_for_scan_status_one_portal())
 
     def process_portal(
         self,
     ) -> bool:
-        # will load the properties from artifactory or create derived based on uri
-        assert self.what_backend == "portal"
-        assert self.fp is not None
+        """Scan one generic artifact against the portal.
 
-        skip_candidate = self.fp.skip_non_candidate_file()  # it there is no meta we will have to scan all files
-        if skip_candidate:
-            logger.debug("skip: %s", self.uri)
-            self.processing_info.completed = True
-            self.processing_info.status = PROCESS_FILE_SKIP
-            self.processing_info.reason = "skip: not a candidate for inspection"
-            self.processing_info.scan_state = None
-            self.processing_info.report = None
-            self.processing_info.purl = None
-            return True
+        A generic repository has no layout to derive a purl from, so the purl
+        comes from the .rl_meta side-car (§7). The steps are the same three as in
+        process_cli, with the side-car read where cli derives a name instead.
+        """
+        if self.what_backend != "portal":
+            msg = "expected self.what_backend == 'portal'"
+            raise SpectraAssureInvariantError(msg)
 
-        if self.get_prop_progress() in ["scanned", "portal_upload_ok"]:
-            self.steps["artifactory_properties_exists"] = True
-            if self.cli_args.get("ignore_artifactory_properties") is False:
-                if self.get_prop_progress() in ["scanned"]:
-                    if self.sync_possible() is False:  # requires property scanned
-                        self.processing_info.completed = True
-                        self.processing_info.status = PROCESS_FILE_SKIP
-                        self.processing_info.reason = "already proccessed"
-                        self.processing_info.scan_state = self.get_prop_progress()
-                        self.processing_info.report = self.get_prop_report()
-                        self.processing_info.purl = self.get_prop_purl()
-                        return True
+        handled = self._stop_if_not_a_candidate()
+        if handled is not None:
+            return handled
 
-                    # we can do a sync instead of a scan
-                    self.need_sync_datetime = True
+        handled = self._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False)
+        if handled is not None:
+            return handled
 
-        self.steps["artifactory_properties_exists"] = False
         logger.debug("inspect %s", self.uri)
 
         meta_ok, _ = self._load_meta_info()  # if there is no meta we ignore this item
         if meta_ok is False:
-            self.processing_info.completed = True
-            self.processing_info.status = PROCESS_FILE_SKIP
-            self.processing_info.reason = "meta file extract failed"
-            self.processing_info.scan_state = None
-            self.processing_info.report = None
-            self.processing_info.purl = None
-            return True
+            return self._stop("meta file extract failed")
 
-        assert self.purl_info.project is not None
-        assert self.purl_info.package is not None
-        assert self.purl_info.version is not None
-
-        self.steps["have_package_url"] = True
-
-        project = self.purl_info.project
-        package = self.purl_info.package
-        version = self.purl_info.version
+        project, package, version = self._purl_parts()
 
         return self._process_portal(
             project=project,
@@ -466,117 +624,47 @@ class ArtifactoryFileProcessorGeneric(
         package: str,
         version: str,
     ) -> bool:
-        assert self.what_backend == "cli"
+        if self.what_backend != "cli":
+            msg = "expected self.what_backend == 'cli'"
+            raise SpectraAssureInvariantError(msg)
 
         logger.debug("candidate2 %s", self.uri)
-        self.steps["artifactory_properties_exists"] = False
 
         self._populate_purl_info(project, package, version)
-        self.steps["have_package_url"] = True
-        purl = self.purl_info.make_purl()
 
-        # for now just keep the downloaded file even if we dont actually need it for sync
-        download_path, verify_ok = self._do_one_artifactory_download()
-        if download_path is None:
-            msg = f"skip: download failed for: {self.file}"
-            logger.error(msg)
-
-            self.processing_info.completed = True
-            self.processing_info.reason = msg
-            self.processing_info.status = PROCESS_FILE_SKIP
-            self.processing_info.scan_state = None
-            self.processing_info.purl = purl
-            self.processing_info.report = None
-            return False
-
-        return self.do_cli_after_download(  # will handle sync now internally
+        return self.do_cli_scan_or_sync(
             project=project,
             package=package,
             version=version,
-            download_path=download_path,
         )
 
     def process_cli(
         self,
     ) -> bool:
-        assert self.what_backend == "cli"
+        """Scan one generic artifact with the cli backend.
+
+        There is no .rl_meta side-car for cli, so the purl is made from the
+        repository name and the file name. That is also why a sync cannot be used
+        here: without a side-car every package in the repository would carry the
+        same purl, and a sync could not tell them apart.
+        """
+        if self.what_backend != "cli":
+            msg = "expected self.what_backend == 'cli'"
+            raise SpectraAssureInvariantError(msg)
+
         logger.debug("candidate1 %s", self.uri)
 
-        assert self.fp is not None
+        handled = self._stop_if_not_a_candidate()
+        if handled is not None:
+            return handled
 
-        skip_candidate = self.fp.skip_non_candidate_file()
-        if skip_candidate:
-            self.processing_info.completed = True
-            self.processing_info.status = PROCESS_FILE_SKIP
-            self.processing_info.reason = "skip: not a candidate for inspection"
-            self.processing_info.scan_state = None
-            self.processing_info.report = None
-            self.processing_info.purl = None
-            return True
+        handled = self._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=True)
+        if handled is not None:
+            return handled
 
-        if self.get_prop_progress() in ["scanned", "portal_upload_ok"]:
-            self.steps["artifactory_properties_exists"] = True
-            if self.cli_args.get("ignore_artifactory_properties") is False:
-
-                # if the scan date is older then 2 weeks schedule a sync instead of a scan # TODO
-                if self.get_prop_progress() in ["scanned"]:
-                    if self.sync_possible() is False:
-                        self.processing_info.completed = True
-                        self.processing_info.status = PROCESS_FILE_SKIP
-                        self.processing_info.reason = "already proccessed"
-                        self.processing_info.scan_state = self.get_prop_progress()
-                        self.processing_info.report = self.get_prop_report()
-                        self.processing_info.purl = self.get_prop_purl()
-                        return True
-
-                    self.need_sync_datetime = True
-                    # sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
-                    # we can do a sync instead of a scan
-                    # but generic has no true purl as we have no meta file for cli currently
-                    # so we cant sync as all packages are the same purl
-
-                    self.processing_info.completed = True
-                    self.processing_info.status = PROCESS_FILE_SKIP
-                    self.processing_info.reason = (
-                        "sync not possible with cli as we have no valid purl without a meta file"
-                    )
-                    self.processing_info.scan_state = self.get_prop_progress()
-                    self.processing_info.report = self.get_prop_report()
-                    self.processing_info.purl = self.get_prop_purl()
-                    return True
-
-        # sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
-
-        self.steps["artifactory_properties_exists"] = False
         logger.debug("inspect %s", self.uri)
-
-        # for generic
-        meta_info = {
-            "project": self.file.repo.name,
-            "package": self._escape_string_for_spectra_assure_purl_component(self.filename),
-            "version": "v0",
-        }
-        logger.debug(self.repo_db)
-        if self.uri in self.repo_db:
-            logger.debug("%s", self.repo_db[self.uri])
-            meta_info = self.repo_db[self.uri]
-        logger.debug("%s", meta_info)
-
-        # currently no meta file for cli
-        self.purl_info.project = meta_info["project"]
-        self.purl_info.package = meta_info["package"]
-        self.purl_info.version = meta_info["version"]
-        # print(self.purl_info)
-
-        self.steps["have_package_url"] = True
-
-        assert self.purl_info.project is not None
-        assert self.purl_info.package is not None
-        assert self.purl_info.version is not None
-
-        project = self.purl_info.project
-        package = self.purl_info.package
-        version = self.purl_info.version
+        self._set_purl_without_a_meta_file()
+        project, package, version = self._purl_parts()
 
         return self._process_cli(
             project=project,
@@ -584,14 +672,127 @@ class ArtifactoryFileProcessorGeneric(
             version=version,
         )
 
+    def _stop(
+        self,
+        reason: str,
+        *,
+        from_properties: bool = False,
+    ) -> bool:
+        """Stop with this reason.
+
+        `from_properties` carries over what an earlier run recorded, for the cases
+        where we stop *because* of it; otherwise the fields are cleared, because
+        nothing has been established about this artifact.
+        """
+        self.processing_info.completed = True
+        self.processing_info.status = PROCESS_FILE_SKIP
+        self.processing_info.reason = reason
+
+        if from_properties:
+            self.processing_info.scan_state = self.get_prop_progress()
+            self.processing_info.report = self.get_prop_report()
+            self.processing_info.purl = self.get_prop_purl()
+            return True
+
+        self.processing_info.scan_state = None
+        self.processing_info.report = None
+        self.processing_info.purl = None
+        return True
+
+    def _stop_if_not_a_candidate(
+        self,
+    ) -> bool | None:
+        """None to carry on. Without a side-car every file has to be looked at."""
+        if self.fp is None:
+            msg = "expected self.fp is not None"
+            raise SpectraAssureInvariantError(msg)
+
+        if self.fp.skip_non_candidate_file():
+            logger.debug("skip: %s", self.uri)
+            return self._stop("skip: not a candidate for inspection")
+
+        return None
+
+    def _stop_if_an_earlier_run_finished_this(
+        self,
+        *,
+        sync_needs_a_meta_file: bool,
+    ) -> bool | None:
+        """What the RL.* properties of an earlier run say. None to carry on.
+
+        `sync_needs_a_meta_file` is the one difference between the two backends:
+        the cli purl is made from a file name, so every package in a generic
+        repository would share it and a sync could not tell them apart.
+        """
+        progress = self.get_prop_progress()
+        if progress not in PROGRESS_ALL:
+            return None
+
+        if self.cli_args.get("ignore_artifactory_properties") is not False:
+            return None
+
+        # if the scan date is older then 2 weeks schedule a sync instead of a scan # TODO
+        if progress != PROGRESS_SCANNED:
+            return None
+
+        if self.sync_possible() is False:  # requires property scanned
+            return self._stop("already processed", from_properties=True)
+
+        # we can do a sync instead of a scan
+        self.need_sync_datetime = True
+
+        if sync_needs_a_meta_file:
+            return self._stop(
+                "sync not possible with cli as we have no valid purl without a meta file",
+                from_properties=True,
+            )
+
+        return None
+
+    def _set_purl_without_a_meta_file(
+        self,
+    ) -> None:
+        """The cli purl: the repository name and the file name, or the pre pass entry."""
+        meta_info = {
+            "project": self.file.repo.name,
+            "package": self._escape_string_for_spectra_assure_purl_component(self.filename),
+            "version": "v0",
+        }
+
+        logger.debug(self.repo_db)
+        if self.uri in self.repo_db:
+            logger.debug("%s", self.repo_db[self.uri])
+            meta_info = self.repo_db[self.uri]
+        logger.debug("%s", meta_info)
+
+        self.purl_info.project = meta_info["project"]
+        self.purl_info.package = meta_info["package"]
+        self.purl_info.version = meta_info["version"]
+
+    def _purl_parts(
+        self,
+    ) -> tuple[str, str, str]:
+        """The three purl components, once whatever set them says it succeeded."""
+        if self.purl_info.project is None:
+            msg = "expected self.purl_info.project is not None"
+            raise SpectraAssureInvariantError(msg)
+        if self.purl_info.package is None:
+            msg = "expected self.purl_info.package is not None"
+            raise SpectraAssureInvariantError(msg)
+        if self.purl_info.version is None:
+            msg = "expected self.purl_info.version is not None"
+            raise SpectraAssureInvariantError(msg)
+
+        return self.purl_info.project, self.purl_info.package, self.purl_info.version
+
     # PUBLIC
-    def extract_generic_meta_info(self) -> Dict[str, Any]:
+    def extract_generic_meta_info(self) -> dict[str, Any]:
         """
         Download the rl_meta file
         extract its properties,
         return a dict with the meta info and a valid purl.
         """
-        meta_dict: Dict[str, Any] = {}
+        meta_dict: dict[str, Any] = {}
         has_meta, meta = self._load_meta_info()
         if has_meta is False:
             logger.debug("%s", meta)
@@ -606,11 +807,13 @@ class ArtifactoryFileProcessorGeneric(
 
         return meta_dict
 
-    def process(  # noqa: C901
+    def process(
         self,
     ) -> bool:  # completed yes/no if no we have uploaded but the scan has not completed yet
         # will load the properties from artifactory or create derived based on uri
-        assert self.fp is not None
+        if self.fp is None:
+            msg = "expected self.fp is not None"
+            raise SpectraAssureInvariantError(msg)
         if self.what_backend == "portal":
             return self.process_portal()
         return self.process_cli()

@@ -1,0 +1,56 @@
+# Makefile tab=tab,ts=4
+SHELL := /bin/bash
+export SHELL
+
+# ------------------------------------------
+# the lowest installed python3.NN that is at least 3.11 (requires-python)
+MIN_PYTHON_VERSION := $(shell basename $$( ls /usr/bin/python3.[0-9][0-9] | sort -V | awk -F. '$$NF >= 11 {print $$0; exit}' ) )
+export MIN_PYTHON_VERSION
+
+PIP_INSTALL := pip3 \
+	--require-virtualenv \
+	--disable-pip-version-check \
+	--no-color install --no-cache-dir
+
+VENV := ./vtmp/
+export VENV
+
+COMMON_VENV := rm -rf $(VENV); \
+	$(MIN_PYTHON_VERSION) -m venv $(VENV); \
+	source ./$(VENV)/bin/activate;
+
+COMMON_RUN := $(COMMON_VENV) \
+	$(PIP_INSTALL) -r requirements.txt ; \
+	$(MIN_PYTHON_VERSION)
+
+# ------------------------------------------
+REPOS_DEBIAN := ubuntu
+REPOS_DOCKER := docker docker-local
+REPOS_GENERIC := my-release-candidates
+REPOS_MVN := maven2-dev,maven2-local-dev
+REPOS_NPM := nmpjs.org,npm-local
+REPOS_NUGET :=
+REPOS_PYPI := pypi
+REPOS_RPM :=
+REPOS_RUBY := rubygems-1
+
+REPO_LIST_DEFAULT := \
+	--repo $(REPOS_MVN) \
+	--repo $(REPOS_NPM) \
+	--repo $(REPOS_PYPI) \
+	--repo $(REPOS_RUBY) \
+	--repo $(REPOS_DEBIAN)
+
+REPO_LIST_FULL := \
+	--repo  $(REPOS_DOCKER) \
+	--repo $(REPOS_GENERIC) \
+	$(REPO_LIST_DEFAULT)
+
+# testing params
+# change the portal env file content to test different endpoints
+ENV_FILE_PORTAL := ~/.env_portal
+ENV_FILE_CLI := ~/.env_cli
+ENV_FILE_CLOUD := ~/.env_cloud
+
+DOWNLOAD_PATH := ./tmp2
+export DOWNLOAD_PATH

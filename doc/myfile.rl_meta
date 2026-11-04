@@ -29,10 +29,10 @@ sha256 =
 # - purl:    <project>/<package>@<version>
 #
 # none or the resulting strings may contain @ or / or any html conflicting data,
-# if they do containg restricted substrings these will be mapped away to safe values:
+# if they do contain restricted substrings these will be mapped away to safe values:
 #   e.g. '_'
 #
 # in order to find and verify the file described by this meta info we need the mandatory
 #
 # - <path>      [mandatory]
-# - <sha256>    [mandatory]
+# - <sha256>    [optional]

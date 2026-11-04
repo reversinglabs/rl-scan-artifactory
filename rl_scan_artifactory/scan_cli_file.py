@@ -1,13 +1,10 @@
-from typing import (
-    Tuple,
-    Dict,
-    Any,
-    Optional,
-)
 import logging
-import tempfile
+import pathlib
 import shutil
-import os
+import tempfile
+from typing import (
+    Any,
+)
 
 from .py_cli_scan import (
     ScanCliBase,
@@ -19,10 +16,9 @@ logger = logging.getLogger()
 
 
 class ScanCli:
-
     def __init__(
         self,
-        cli_args: Dict[str, Any],
+        cli_args: dict[str, Any],
     ) -> None:
         self.cli_args = cli_args
 
@@ -32,21 +28,27 @@ class ScanCli:
         self.rlsecure_dir = self.cli_args.get("cli_rlsecure_path")
         if self.rlsecure_dir:  # is None for docker
             msg = f"the path '{self.rlsecure_dir}' must be the directory where we can find rl-secure and rl-safe"
-            assert os.path.isdir(self.rlsecure_dir), msg
+            if not pathlib.Path(self.rlsecure_dir).is_dir():
+                raise RuntimeError(msg)
 
     def _cli_docker_scan_or_sync(
         self,
+        *,
         file_path: str,
         purl: str,
         encoded_license: str,
         site_key: str,
-        store: Optional[str] = None,
+        store: str | None = None,
         sync_requested: bool = False,
-    ) -> Tuple[int, str, str | None]:
+    ) -> tuple[int, str, str | None]:
         logger.debug("%s %s", file_path, purl)
 
-        assert encoded_license is not None
-        assert site_key is not None
+        if not encoded_license:
+            msg = "encoded_license is None"
+            raise RuntimeError(msg)
+        if not site_key:
+            msg = "site_key_license is None"
+            raise RuntimeError(msg)
 
         self.temp_dir_name = tempfile.mkdtemp()
 
@@ -60,8 +62,9 @@ class ScanCli:
             reports_list=self.cli_args.get("reports_requested", []),
         )
 
-        if sync_requested:
-            assert store is not None
+        if sync_requested and not store:
+            msg = "store is None"
+            raise RuntimeError(msg)
 
         if sync_requested is True and self.scanner.test_purl_exists():
             ret, report_bundle_path, result = self.scanner.do_sync_and_report(
@@ -79,15 +82,24 @@ class ScanCli:
 
     def _cli_local_scan_or_sync(
         self,
+        *,
         file_path: str,
         purl: str,
         rlsecure: str,
-        store: Optional[str] = None,
+        store: str | None = None,
         sync_requested: bool = False,
-    ) -> Tuple[int, str, str | None]:
-        logger.debug("file_path: %s purl: %s rlsecure: %s store: %s", file_path, purl, rlsecure, store)
+    ) -> tuple[int, str, str | None]:
+        logger.debug(
+            "file_path: %s purl: %s rlsecure: %s store: %s",
+            file_path,
+            purl,
+            rlsecure,
+            store,
+        )
 
-        assert rlsecure is not None
+        if not rlsecure:
+            msg = "rlsecure is None"
+            raise RuntimeError(msg)
 
         self.temp_dir_name = tempfile.mkdtemp()
         self.scanner = ScanCliLocal(
@@ -98,8 +110,9 @@ class ScanCli:
             reports_list=self.cli_args.get("reports_requested", []),
         )
 
-        if sync_requested:
-            assert store is not None
+        if sync_requested and not store:
+            msg = "store is None"
+            raise RuntimeError(msg)
 
         if sync_requested is True and self.scanner.test_purl_exists():
             ret, report_bundle_path, result = self.scanner.do_sync_and_report(
@@ -119,6 +132,7 @@ class ScanCli:
 
     def scan_file(
         self,
+        *,
         file_path: str,
         purl: str,
         sync_requested: bool = False,
@@ -137,7 +151,10 @@ class ScanCli:
                 sync_requested=sync_requested,
             )
 
-        assert self.rlsecure_dir is not None
+        if not self.rlsecure_dir:
+            msg = "self.rlsecure_dir is None"
+            raise RuntimeError(msg)
+
         return self._cli_local_scan_or_sync(
             file_path=file_path,
             purl=purl,
@@ -146,10 +163,31 @@ class ScanCli:
             sync_requested=sync_requested,
         )
 
+    # Public
+    def get_rl_json_report_path(
+        self,
+    ) -> str:
+        """Where the rl-json report of the last scan or sync is."""
+        if not self.scanner:
+            msg = "self.scanner is None"
+            raise RuntimeError(msg)
+
+        return self.scanner.get_rl_json_report_path()
+
     def cleanup(
         self,
     ) -> None:
-        assert self.scanner is not None
-        assert self.temp_dir_name is not None
-        self.scanner.cleanup_temp_dir()
-        shutil.rmtree(self.temp_dir_name)
+        """Remove the scan directory, if one was made. Safe to call more than once.
+
+        Called from a `finally`, so it must not assume the scan got far: the
+        directory is made before the scanner, and the scanner can fail to start.
+        """
+        if self.temp_dir_name is None:
+            return
+
+        temp_dir_name, self.temp_dir_name = self.temp_dir_name, None
+        try:
+            shutil.rmtree(temp_dir_name)
+        except OSError as e:
+            # never raise from here: it would replace whatever the scan raised
+            logger.warning("cannot remove scan directory %s: %s", temp_dir_name, e)

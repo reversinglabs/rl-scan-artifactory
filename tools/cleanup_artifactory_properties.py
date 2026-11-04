@@ -1,22 +1,19 @@
 import logging
 import os
-
 from typing import (
-    Dict,
-    List,
     Any,
 )
 
 from rl_scan_artifactory import (
     MyArgs,
 )
+from rl_scan_artifactory.app_base_with_logging import AppBaseWithLogging
+from rl_scan_artifactory.artifactory_api import ArtifactoryApi
+from rl_scan_artifactory.artifactory_repo_info import ArtifactoryRepoInfo
 from rl_scan_artifactory.constants import (
     ARTIFACTORY_KNOWN_PACKAGE_TYPES,
     SPECTRA_ASSURE_PRE,
 )
-from rl_scan_artifactory.app_base_with_logging import AppBaseWithLogging
-from rl_scan_artifactory.artifactory_api import ArtifactoryApi
-from rl_scan_artifactory.artifactory_repo_info import ArtifactoryRepoInfo
 from rl_scan_artifactory.fileinfo import FileInfo
 
 logger = logging.getLogger("")
@@ -61,22 +58,20 @@ class ArtifactoryCleanup(
 
     def extract_my_interesting_files(
         self,
-        one_repo_list: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        my_interesting_files: List[Dict[str, Any]] = []
+        one_repo_list: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        my_interesting_files: list[dict[str, Any]] = []
         for item in one_repo_list.get("files", []):
             if self.p_type != "generic":
                 # only ends with (if defined)
                 ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("endswith", "")
-                if len(ew) > 0:
-                    if not item.get("uri", "").endswith(ew):
-                        continue
+                if len(ew) > 0 and not item.get("uri", "").endswith(ew):
+                    continue
 
                 # skip specific items not endswith (if defined)
                 not_ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("not_endswith", "")
-                if len(not_ew) > 0:
-                    if item.get("uri", "").endswith(not_ew):
-                        continue
+                if len(not_ew) > 0 and item.get("uri", "").endswith(not_ew):
+                    continue
 
             logger.debug("append %s", item)
             my_interesting_files.append(item)
@@ -86,11 +81,11 @@ class ArtifactoryCleanup(
     def _make_file_list_one_repo(
         self,
         repo: ArtifactoryRepoInfo,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         if self.p_type not in ARTIFACTORY_KNOWN_PACKAGE_TYPES:
             return []
 
-        qp: Dict[str, Any] = {
+        qp: dict[str, Any] = {
             "deep": 1,
             "mdTimestamps": 0,
             "listFolders": 0,
@@ -107,9 +102,19 @@ class ArtifactoryCleanup(
         self,
         file: FileInfo,
     ) -> None:
-        to_del: List[str] = []
+        to_del: list[str] = []
         for key, val in file.properties.items():
             if key.startswith(f"{SPECTRA_ASSURE_PRE}."):
+                logger.debug(key)
+                self.artifactory_api.del_one_prop(
+                    repo=file.repo,
+                    item_uri=file.uri,
+                    key=key,
+                    recursive=False,
+                )
+                to_del.append(key)
+
+            if key.startswith("Spectra.Assure."):
                 logger.debug(key)
                 self.artifactory_api.del_one_prop(
                     repo=file.repo,

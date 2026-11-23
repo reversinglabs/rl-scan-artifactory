@@ -29,6 +29,7 @@ from ..constants import (
     PROGRESS_SCANNED,
     PROGRESS_UPLOADED,
     PROP_LEGACY_PRE,
+    PROP_META_PRE,
     PROP_NAME_SPECTRA_ASSURE_GROUP,
     PROP_NAME_SPECTRA_ASSURE_NOSCAN,
     PROP_NAME_SPECTRA_ASSURE_ORG,
@@ -81,8 +82,8 @@ def obsolete_property_names(
     The integration is the sole owner of the RL. prefix (the other
     ReversingLabs integration uses secure.software.), so any RL.* name not in
     `maintained` is obsolete, as is everything under the old Spectra.Assure.
-    prefix. RL.noscan stays: it is read on every item, and a person may have set
-    it.
+    prefix. RL.noscan and RL.meta.* stay: a person sets those, RL.noscan is
+    read on every item and RL.meta.* on a generic one (R7.11).
     """
     keep = (*maintained, PROP_NAME_SPECTRA_ASSURE_NOSCAN)
 
@@ -90,6 +91,8 @@ def obsolete_property_names(
     for key in properties:
         if key.startswith(f"{PROP_LEGACY_PRE}."):
             obsolete.append(key)
+        elif key.startswith(f"{PROP_META_PRE}."):
+            continue
         elif key.startswith(f"{SPECTRA_ASSURE_PRE}.") and key not in keep:
             obsolete.append(key)
 
@@ -934,6 +937,7 @@ class ArtifactoryFileProcessorCommon(
             "debian": NameManglerDebian,
             "deb": NameManglerDebian,
             "maven": NameManglerMaven,
+            "gradle": NameManglerMaven,
             "gems": NameManglerGems,
             "docker": NameManglerDocker,
             "generic": NameManglerGeneric,
@@ -1027,11 +1031,15 @@ class ArtifactoryFileProcessorCommon(
     ) -> str:
         return self._get_prop_what(PROP_NAME_SPECTRA_ASSURE_TIMESTAMP)
 
+    def sync_requested(self) -> bool:
+        """An explicit --sync, or an earlier scan old enough to sync (R12.7.3)."""
+        return bool(self.cli_args.get("sync", False) or self.need_sync_datetime)
+
     def sync_possible(
         self,
     ) -> bool:
-        if self.cli_args.get("cli-docker"):
-            logger.warning("sync is currently not possible with cli-docker")
+        if self.cli_args.get("cli_docker"):
+            logger.debug("sync is currently not possible with cli-docker")
             return False
 
         last_scan = self.get_prop_last_scan_moment()
@@ -1125,8 +1133,7 @@ class ArtifactoryFileProcessorCommon(
         if self.p_type == "docker":
             return False
 
-        sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
-        if sync_requested is False:
+        if self.sync_requested() is False:
             return False
 
         return ScanCliLocal.purl_in_store(
@@ -1270,7 +1277,7 @@ class ArtifactoryFileProcessorCommon(
             self.add_file_to_remove(download_path)
 
         purl = self.purl_info.make_purl()
-        sync_requested = bool(self.cli_args.get("sync", False) or self.need_sync_datetime)
+        sync_requested = self.sync_requested()
 
         # the scan directory is removed whatever happens: an exception here is
         # contained per artifact and the run goes on, so a cleanup on the normal

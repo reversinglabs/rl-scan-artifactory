@@ -328,7 +328,10 @@ class MyArgs:  # pylint: disable=R0903; Too few public methods
             "-I",
             "--ignore-artifactory-properties",
             action="store_true",
-            help="When the 'Spectra.Asure' properties are already present in Artifactory, ignore them and re-scan.",
+            help=(
+                "Ignore the scan results an earlier run recorded in the RL.* properties, and scan again. "
+                "RL.noscan and RL.meta.* are still read."
+            ),
         )
 
         self.parser.add_argument(

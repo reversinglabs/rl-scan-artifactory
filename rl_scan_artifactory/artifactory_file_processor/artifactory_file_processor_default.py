@@ -70,7 +70,7 @@ class ArtifactoryFileProcessorDefault(
             self.processing_info.purl = purl
             self.processing_info.reason = "purl exists on portal"
 
-            sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
+            sync_requested = self.sync_requested()
             if sync_requested is False:
                 self.processing_info.status = PROCESS_FILE_SKIP
                 self.processing_info.scan_state = scan_status

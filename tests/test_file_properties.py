@@ -457,3 +457,39 @@ def test_is_noscan_tolerates_a_bare_string() -> None:
     """Artifactory gives lists, but nothing guarantees it for a hand set property."""
     fp = pypi_props(stored={**CANDIDATE_PROPS, NOSCAN: "true"})
     assert fp.is_noscan() is True
+
+
+# ------------------------------------------------------------------- gradle
+# R4.1.7: a gradle repository is read like maven, in the maven-2-default layout.
+
+GRADLE_JAR = "/org/apache/logging/log4j/log4j-api/2.12.1/log4j-api-2.12.1.jar"
+
+
+def test_gradle_derives_the_maven_properties_under_its_own_type() -> None:
+    fp = props_for(FilePropertiesMaven, uri=GRADLE_JAR, package_type="gradle")
+    front = "gradle._derived_"  # under its own type, which simple data reads
+    assert fp.file.properties[f"{front}.namespace"] == ["org.apache.logging.log4j"]
+    assert fp.file.properties[f"{front}.name_only"] == ["log4j-api"]
+    assert fp.file.properties[f"{front}.name"] == ["org.apache.logging.log4j.log4j-api"]
+    assert fp.file.properties[f"{front}.version"] == ["2.12.1"]
+    assert not any(k.startswith("maven.") for k in fp.file.properties)
+
+
+def test_a_gradle_jar_is_a_candidate_with_name_and_version() -> None:
+    fp = props_for(FilePropertiesMaven, uri=GRADLE_JAR, package_type="gradle")
+    assert fp.skip_non_candidate_file() is False
+    assert fp.file.simple["name"] == ["org.apache.logging.log4j.log4j-api"]
+    assert fp.file.simple["version"] == ["2.12.1"]
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "/org/example/mylib/1.0/mylib-1.0.pom",
+        "/org/example/mylib/1.0/mylib-1.0.module",  # gradle module metadata
+        "/org/example/mylib/1.0/mylib-1.0.jar.sha1",
+    ],
+)
+def test_a_gradle_non_jar_is_not_a_candidate(uri: str) -> None:
+    fp = props_for(FilePropertiesMaven, uri=uri, package_type="gradle")
+    assert fp.skip_non_candidate_file() is True

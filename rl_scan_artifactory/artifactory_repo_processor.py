@@ -67,16 +67,15 @@ class ArtifactoryRepoProcessor(
             if item.get("uri") and item.get("sha2"):
                 self.sha2_by_uri[item["uri"]] = item["sha2"]
 
-            if not (self.p_type == "generic" and self.cli_args.get("cli")):
-                # only ends with (if defined)
-                ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("endswith", "")
-                if len(ew) > 0 and not item.get("uri", "").endswith(ew):
-                    continue
+            # only ends with (if defined; generic defines none, R7.11.5)
+            ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("endswith", "")
+            if len(ew) > 0 and not item.get("uri", "").endswith(ew):
+                continue
 
-                # skip specific items not endswith (if defined)
-                not_ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("not_endswith", "")
-                if len(not_ew) > 0 and item.get("uri", "").endswith(not_ew):
-                    continue
+            # skip specific items not endswith (if defined)
+            not_ew = ARTIFACTORY_KNOWN_PACKAGE_TYPES[self.p_type].get("not_endswith", "")
+            if len(not_ew) > 0 and item.get("uri", "").endswith(not_ew):
+                continue
 
             logger.debug("append %s", item)
             my_interesting_files.append(item)

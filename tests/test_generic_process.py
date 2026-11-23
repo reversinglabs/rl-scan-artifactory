@@ -6,10 +6,9 @@ complexity 12. They share a decision tree - not a candidate, already processed,
 can we sync - with differences that are easy to lose in a restructure, so each
 one is pinned separately here rather than assumed to be the same.
 
-The important difference: in cli mode a generic artifact has no real purl,
-because there is no meta file for cli, so every package would carry the same
-purl and a sync cannot tell them apart. portal mode reads the .rl_meta side-car
-and does have one.
+The important difference: in cli mode a generic artifact without a side-car
+or RL.meta.* properties has only the <repo>/<file>@v0 placeholder purl, and
+that is never synced (R7.11.6). portal mode always has a real purl.
 """
 
 from typing import (
@@ -172,8 +171,8 @@ def test_portal_can_sync_and_carries_on() -> None:
     assert proc.reached != []
 
 
-def test_cli_cannot_sync_a_generic_artifact() -> None:
-    """There is no meta file for cli, so every package would have the same purl."""
+def test_cli_cannot_sync_a_generic_artifact_with_the_placeholder() -> None:
+    """No side-car and no RL.meta.* properties: only the placeholder purl."""
     proc = run_cli(progress=PROGRESS_SCANNED, sync_possible=True)
 
     assert proc.result is True
@@ -282,7 +281,7 @@ def test_cli_escaping_follows_the_future_flag(monkeypatch: pytest.MonkeyPatch) -
 
 # ------------------------------------------------ the shared steps, on their own
 # Both process functions are now the same three steps, with two differences:
-# where the purl comes from, and whether a sync is possible at all.
+# where the purl comes from, and whether it is a placeholder that never syncs.
 
 
 @pytest.mark.parametrize("backend", ["portal", "cli"])
@@ -299,34 +298,34 @@ def test_a_non_candidate_stops(backend: str) -> None:
 
 def test_nothing_recorded_hands_on() -> None:
     proc = processor(backend="portal", progress="")
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False) is None
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=False) is None
 
 
 def test_ignoring_the_properties_hands_on() -> None:
     proc = processor(backend="portal", progress=PROGRESS_SCANNED, ignore_properties=True)
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False) is None
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=False) is None
 
 
 def test_a_recent_scan_stops_whichever_backend() -> None:
-    for needs_meta in (False, True):
+    for placeholder in (False, True):
         proc = processor(backend="portal", progress=PROGRESS_SCANNED, sync_possible=False)
-        assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=needs_meta) is True
+        assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=placeholder) is True
         assert proc.processing_info.reason == "already processed"
 
 
 def test_a_syncable_scan_hands_on_when_a_purl_exists() -> None:
-    """portal: the side-car gives a real purl, so a sync can be told apart."""
+    """A real purl - a side-car, or RL.meta.* properties - can be synced."""
     proc = processor(backend="portal", progress=PROGRESS_SCANNED, sync_possible=True)
 
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False) is None
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=False) is None
     assert proc.need_sync_datetime is True
 
 
-def test_a_syncable_scan_stops_when_the_purl_is_not_unique() -> None:
-    """cli: every package would share one purl, so the sync cannot be used."""
+def test_a_syncable_scan_stops_when_the_purl_is_a_placeholder() -> None:
+    """cli without either: the placeholder names a file, not a version."""
     proc = processor(backend="cli", progress=PROGRESS_SCANNED, sync_possible=True)
 
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=True) is True
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=True) is True
     assert proc.need_sync_datetime is True
     assert "sync not possible with cli" in proc.processing_info.reason
 

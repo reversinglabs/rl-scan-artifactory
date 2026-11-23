@@ -59,8 +59,8 @@ This workflow is ideal for users already familiar with the Spectra Assure CLI, a
 - **Spectra Assure CLI Docker image [reversinglabs/rl-scanner](https://hub.docker.com/r/reversinglabs/rl-scanner)**.
 In this workflow, the integration scans artifacts locally inside the Docker container, without uploading them to ReversingLabs.
 To scan the artifacts, the `rl-scanner` Docker image is used to run `rl-secure` in a container.
-A package store must be initialized.
-The `sync` option is not supported.
+A package store is optional: with `--cli-rlstore-path` the scans are kept in that store, without it the store lives only inside the container.
+The `sync` option is not supported: the `rl-scanner` image has no sync command.
 Analysis reports are automatically uploaded to Artifactory as a compressed file.
 This workflow is ideal for users who want to scan their artifacts in ephemeral environments.
 
@@ -118,16 +118,20 @@ The following [package types](https://jfrog.com/help/r/jfrog-artifactory-documen
 - **Debian** - files ending in `.deb`
 - **Docker** - `manifest.json` files. More details in the [Working with Docker images](#working-with-docker-images) section
 - **RubyGems** - files ending in `.gem`
-- **Generic** - files ending in `.rl_meta` when scanning with the Portal. When scanning with the CLI or CLI Docker image, all files are scanned and assigned a placeholder package URL, but it's not possible to use the `sync` option. More details in the [Working with generic repositories](#working-with-generic-repositories) section
+- **Generic** - files described by a `.rl_meta` file or carrying `RL.meta.*` properties, when scanning with the Portal. When scanning with the CLI or CLI Docker image, all files are scanned. Files without description or properties get a placeholder package URL. With the CLI, `sync` works for files with a `.rl_meta` file or `RL.meta.*` properties, not for files with the placeholder. The CLI Docker image does not support `sync`. More details in the [Working with generic repositories](#working-with-generic-repositories) section
+- **Gradle** - files ending in `.jar`, in a repository with the default `maven-2-default` layout. A Gradle repository with another layout is skipped with a `REPO SKIP` message that names the layout
 - **Maven** - files ending in `.jar`
 - **npm** - files ending in `.tgz`
+- **NuGet** - files ending in `.nupkg`
 - **PyPI** - files with properties `.name` and `.version`
 - **RPM** - files ending in `.rpm`.
+
+A repository of any other package type, for example Ivy, is skipped with a `REPO SKIP` message that names its type.
 
 
 All files ending in `-reports.zip` are skipped regardless of the package type.
 
-All files ending in `.rl_meta` are skipped.
+Files ending in `.rl_meta` are not scanned themselves: with `--portal` each one stands for the artifact it describes, and with `--cli` or `--cli-docker` they are skipped.
 
 
 ## Installation
@@ -209,10 +213,10 @@ Depending on the product choice, some parameters may be ignored because they are
 | --cli-reports-repo  | Compatibility parameter for storing reports in remote repositories. By default, Artifactory repositories of type `remote` cannot be used to store reports. The integration needs a custom `local` `generic` repository to store the reports (e.g `Spectra-Assure-Reports`), and it should be specified with this parameter. If not specified, all `remote` repositories will be skipped. |
 | --download, -d   | Path to an existing directory that the integration can use for temporary artifact downloads from Artifactory. If not specified, Python `tempfile.gettempdir()` will be used. |
 | --ignore-cert-errors | Allow working with invalid or self-signed certificates. Default: `false` |
-| --ignore-artifactory-properties, -I | If specified, the integration will ignore any existing properties set for the scanned artifacts in Artifactory. |
+| --ignore-artifactory-properties, -I | If specified, the integration ignores the scan results an earlier run recorded in the `RL.*` properties, and scans the artifacts again. `RL.noscan` and `RL.meta.*` are still read. |
 | --verbose, -v    | Display more detailed progress messages and scan results on stdout. |
 | --log-to-stderr | Also write the log to stderr, in addition to the `<program>.log` file which is always written. Progress output goes to stdout, so the two can be redirected separately. Default: `false` |
-| --keep-obsolete-properties | Preserve the unmaintained properties this integration wrote in earlier versions. If this option is not used, each inspected item loses everything under the old `Spectra.Assure.` prefix, any `RL.*` property the integration no longer writes, and the scan result (`RL.scan-status`, `RL.scan-report`, `RL.package-url`, `RL.organization`, `RL.group`) on a generic `.rl_meta` side-car. The side-car now only keeps `RL.progress`, `RL.timestamp` and `RL.sha256`. A CLI run cleans `.rl_meta` side-cars the same way, though it does not scan them. Report files (`-reports.zip`) keep only `RL.noscan`. `RL.noscan` and properties with other prefixes are never touched. Default: `false` |
+| --keep-obsolete-properties | Preserve the unmaintained properties this integration wrote in earlier versions. If this option is not used, each inspected item loses everything under the old `Spectra.Assure.` prefix, any `RL.*` property the integration no longer writes, and the scan result (`RL.scan-status`, `RL.scan-report`, `RL.package-url`, `RL.organization`, `RL.group`) on a generic `.rl_meta` side-car. The side-car now only keeps `RL.progress`, `RL.timestamp` and `RL.sha256`. A CLI run cleans `.rl_meta` side-cars the same way, though it does not scan them. Report files (`-reports.zip`) keep only `RL.noscan`. `RL.noscan`, `RL.meta.*` and properties with other prefixes are never touched. Default: `false` |
 | --ignore-skipped | Exit 0 when the run finished but some artifacts or repositories were skipped; without it such a run exits 103. The skipped items are logged and summarised either way. Default: `false` |
 | --waittime, -w   | **Portal workflow only**. Specify the maximum amount of minutes to wait for a Portal scan to finish. If an artifact is not finished scanning by then, it is postponed for a later run based on its `RL.progress` property. |
 | --version, -V    | Show currently installed version of the integration and exit. |
@@ -274,10 +278,16 @@ To resolve this issue, you can use the [fix_marker.sh](tools/fix_marker.sh) scri
 
 ## Working with generic repositories
 
-Scanning repositories with the package type 'generic' requires a custom `.rl_meta` file for each artifact to allow creating proper package URLs.
+Repositories with the package type 'generic' have no package metadata, so you have to specify the name and version for each artifact to allow creating proper package URLs.
+There are two ways to do this:
 
-- When scanning with `--portal`, only those artifacts with the `.rl_meta` file will be scanned.
-- When scanning with `--cli` or `--cli-docker`, artifacts without the `.rl-meta` file will get a dummy package URL in the format `<repo name>/<filename>@v0`.
+1. A custom `.rl_meta` file next to the artifact, described below.
+2. `RL.meta.*` properties set on the artifact itself, see [Using properties instead of a `.rl_meta` file](#using-properties-instead-of-a-rl_meta-file).
+
+For each artifact, a `.rl_meta` file is used first; if there is none, the `RL.meta.*` properties are used.
+
+- When scanning with `--portal`, only the artifacts with a `.rl_meta` file or `RL.meta.*` properties will be scanned.
+- When scanning with `--cli` or `--cli-docker`, artifacts without description or properties will get a placeholder package URL in the format `<repo name>/<filename>@v0`.
 
 The custom `.rl_meta` file must be in `ini` format with a mandatory section called `rl_meta` like in the following example.
 
@@ -318,9 +328,39 @@ Specifically, the following components from the `rl_meta` file map to the parts 
 The resulting package URL should not contain `@` or `/` or any HTML-conflicting data.
 If any of its parts do contain restricted substrings, they will be automatically converted to safe values so that a valid package URL can be constructed.
 
-When using `--cli` or `--cli-docker` to scan a generic repository, the `rl_meta` file is not supported, and all files in the repository will be scanned.
-In this case, a placeholder ("dummy") package URL is used for both `--cli` and `--cli-docker`.
-Because generic items without a proper package URL cannot be reanalyzed, the `sync` option is not supported.
+### Using properties instead of a `.rl_meta` file
+
+Instead of creating a `.rl_meta` file, you can set these properties on the artifact itself:
+
+| Property              | Required | Same as `rl_meta` field |
+| --                    | --       | -- |
+| `RL.meta.name`         | Yes      | `name` |
+| `RL.meta.version`      | Yes      | `version` |
+| `RL.meta.namespace`    | No       | `namespace` |
+| `RL.meta.architecture` | No       | `architecture` |
+
+`path` and `sha256` are not needed: the properties are on the file itself, and Artifactory already holds its SHA256 hash.
+The package URL is built exactly as from a `.rl_meta` file.
+
+For example, with the JFrog CLI:
+
+```
+jf rt set-props "generic-local/windows/mypackagename-windows-arm_v8-v1.0.99.msi" \
+    "RL.meta.name=mypackagename;RL.meta.version=v1.0.99;RL.meta.namespace=windows;RL.meta.architecture=arm_v8"
+```
+
+- If an artifact has a `.rl_meta` file, its `RL.meta.*` properties are ignored.
+- If an artifact has some `RL.meta.*` properties but lacks `RL.meta.name` or `RL.meta.version`, it is not scanned: the error names the missing properties, and the run exits with code `103` (see [Exit codes](#exit-codes)).
+- A `.rl_meta` file that cannot be read (for example, one missing a mandatory field) fails only that file, with exit code `103`; the rest of the repository is still scanned.
+- The integration never changes or removes `RL.meta.*` properties, even if the `--keep-obsolete-properties` parameter is used.
+
+### Scanning generic repositories with the CLI
+
+When using `--cli` or `--cli-docker` to scan a generic repository, all files in the repository will be scanned.
+The package URL comes from the `.rl_meta` file or from the `RL.meta.*` properties. For files without a description or properties, a placeholder package URL is used.
+With `--cli`, a file with a `.rl_meta` file or `RL.meta.*` properties is synced like any other artifact: with `--sync`, or automatically when its last scan is older than 14 days.
+A file with the placeholder package URL is never synced: an earlier scan is reported as it is, and with `--sync` the file is scanned again.
+`--cli-docker` does not support `sync` at all.
 
 
 ## Blocking artifact downloads

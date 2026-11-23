@@ -28,7 +28,11 @@ flowchart TD
     cfg -- no --> skip1[REPO SKIP<br/>does not exist or not readable]:::skip
     cfg -- yes --> rtype{type is<br/>local or remote?}
     rtype -- no --> skip2[REPO SKIP<br/>unsupported type]:::skip
-    rtype -- yes --> cliok{cli, and the reports<br/>have somewhere to go?}
+    rtype -- yes --> ptype{package type<br/>supported?}
+    ptype -- no --> skip4[REPO SKIP<br/>unsupported package type]:::skip
+    ptype -- yes --> glayout{gradle: the maven-2-default<br/>layout?}
+    glayout -- no --> skip5[REPO SKIP<br/>unsupported gradle layout]:::skip
+    glayout -- "yes, or not gradle" --> cliok{cli, and the reports<br/>have somewhere to go?}
     cliok -- no --> skip3[REPO SKIP<br/>verbose only]:::skip
     cliok -- yes --> pre{package type?}
 
@@ -78,7 +82,7 @@ flowchart TD
     d1 -- "anything else" --> skipo[skip: not relevant]:::skip
     d1 -- "manifest.json" --> earlier
 
-    type -- "generic" --> g1[purl from the .rl_meta side-car<br/>portal, or from the file name for cli]
+    type -- "generic" --> g1[purl from the .rl_meta side-car,<br/>else the RL.meta.* properties,<br/>else portal skips, cli uses the file name]
     g1 --> earlier
     type -- "everything else" --> n1[purl from the name mangler<br/>for that package type]
     n1 --> earlier
@@ -90,7 +94,9 @@ flowchart TD
     scanned -- "no, uploaded only" --> go
     scanned -- yes --> stale{last scan<br/>older than 14 days?}
     stale -- no --> skipa[skip: already scanned<br/>reports the stored result]:::skip
-    stale -- yes --> sync[sync instead of scan]
+    stale -- yes --> nosync{cli-docker, or the generic<br/>cli placeholder purl?}
+    nosync -- yes --> skipn[skip: already scanned<br/>never synced]:::skip
+    nosync -- no --> sync[sync instead of scan]
     sync --> go
 
     go{backend?}
@@ -108,9 +114,9 @@ Docker cannot skip the download even when the answer is "already scanned": the
 purl needs the architecture, the architecture is in the config blob, and the
 config blob is only reachable by downloading the manifest and following it.
 
-For generic in **cli** mode the purl is the repository name and the file name, so
-every package in the repository would share it — which is why a sync is refused
-there and only there.
+For generic in **cli** mode without a side-car or `RL.meta.*` properties the purl
+is the placeholder `<repo>/<file name>@v0`. It names a file, not a package
+version, so it is never synced - there and only there (R7.11.6).
 
 ---
 
@@ -178,8 +184,8 @@ flowchart TD
     same -- no --> down
 
     upl[upload the report bundle] -- failed --> failu[this artifact fails<br/>the run continues]:::skip
-    upl -- ok --> tag[tag the report RL.noscan]
-    tag --> write[write RL.* back]:::done
+    upl -- ok --> write[write RL.* back]
+    write --> tag[tag the report: RL.noscan only]:::done
 
     classDef done fill:#dfd,stroke:#090
     classDef skip fill:#ffd,stroke:#960

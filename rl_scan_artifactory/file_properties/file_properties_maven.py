@@ -73,7 +73,7 @@ class FilePropertiesMaven(
     def _get_properties(
         self,
     ) -> None:
-        what = "maven"
+        what = self.p_type  # maven or gradle: the same maven-2-default layout (R4.1.7)
         self._get_common_properties()
 
         # we have no properties: parse the uri to get name and version and namespace

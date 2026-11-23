@@ -41,7 +41,7 @@ CLI_COMMON := \
 CLI_OPTIONS := --cli $(CLI_COMMON) \
 	--cli-rlsecure-path=$$HOME/tmp/rl-secure
 
-# cli-docker currently as no sync possibility (fail on --sync)
+# cli-docker has no sync: the rl-scanner image offers none (fails on --sync)
 CLI_DOCKER_OPTIONS := --cli-docker 	$(CLI_COMMON)
 
 OPTIONS_TEST_CLI := $(OPTIONS_TEST_COMMON) 				$(CLI_OPTIONS)

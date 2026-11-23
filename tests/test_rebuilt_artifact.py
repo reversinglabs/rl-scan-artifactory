@@ -191,18 +191,18 @@ def generic(*, target_sha2: str | None) -> Any:
 
 def test_generic_skips_what_it_scanned_before() -> None:
     proc = generic(target_sha2=OLD)
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False) is True
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=False) is True
 
 
 def test_generic_goes_on_when_the_described_file_was_rebuilt() -> None:
     """The side-car's own hash did not change; the file it describes did."""
     proc = generic(target_sha2=NEW)
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False) is None
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=False) is None
 
 
 def test_generic_trusts_the_progress_when_the_described_file_is_unknown() -> None:
     proc = generic(target_sha2=None)
-    assert proc._stop_if_an_earlier_run_finished_this(sync_needs_a_meta_file=False) is True
+    assert proc._stop_if_an_earlier_run_finished_this(purl_is_a_placeholder=False) is True
 
 
 def test_the_side_car_records_the_hash_of_the_described_file() -> None:

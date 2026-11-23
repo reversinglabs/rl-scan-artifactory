@@ -177,18 +177,28 @@ def test_docker_scans_in_its_own_directory() -> None:
     cli.cleanup()
 
 
-@pytest.mark.parametrize("make", ["local", "docker"])
-def test_a_sync_uses_the_store_when_the_purl_is_there(tmp_path: pathlib.Path, make: str) -> None:
-    cli = local_cli(tmp_path, cli_rlstore_path="/store") if make == "local" else docker_cli(cli_rlstore_path="/store")
+def test_a_sync_uses_the_store_when_the_purl_is_there(tmp_path: pathlib.Path) -> None:
+    cli = local_cli(tmp_path, cli_rlstore_path="/store")
     cli.scan_file(file_path="", purl=PURL, sync_requested=True)
     assert FakeScanner.made[0].calls == ["sync"]
     cli.cleanup()
 
 
-@pytest.mark.parametrize("make", ["local", "docker"])
-def test_a_sync_without_a_store_is_refused(tmp_path: pathlib.Path, make: str) -> None:
+@pytest.mark.parametrize("store", [None, "/store"])
+def test_docker_always_scans(store: str | None) -> None:
+    """The rl-scanner image has no sync and cannot ask a store about a purl (R12.7.2)."""
+    cli = docker_cli(cli_rlstore_path=store)
+    cli.scan_file(file_path="/dl/x.tgz", purl=PURL, sync_requested=True)
+
+    scanner = FakeScanner.made[0]
+    assert scanner.calls == ["scan"]
+    assert scanner.kwargs["store"] == store
+    cli.cleanup()
+
+
+def test_a_sync_without_a_store_is_refused(tmp_path: pathlib.Path) -> None:
     """Refused after the directory was made, so the caller's cleanup must still run."""
-    cli = local_cli(tmp_path) if make == "local" else docker_cli()
+    cli = local_cli(tmp_path)
     with pytest.raises(RuntimeError, match="store is None"):
         cli.scan_file(file_path="", purl=PURL, sync_requested=True)
 

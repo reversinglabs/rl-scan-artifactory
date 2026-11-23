@@ -34,8 +34,6 @@ class ScanCliDocker(
         temp_dir_path: str,  # owned and removed by the caller, must be empty
         reports_list: list[str] | None = None,
     ) -> None:
-        # later: add rl-store external to docker
-
         super().__init__(
             purl=purl,
             temp_dir_path=temp_dir_path,
@@ -64,9 +62,8 @@ class ScanCliDocker(
         realdir_packages = pathlib.Path(file_path).parent
         file_name = pathlib.Path(file_path).name
 
-        # no --rm as we will most likely use the docker image multiple times
-        # currently no external rl-store so no sync possible
-        # when rl-store is needed we have to pass a additional volume that we can read and write to
+        # with a store (--cli-rlstore-path) it is mounted read-write, so the
+        # history survives the container; there is no sync (R12.7.2)
 
         command1 = [
             "docker",
@@ -125,54 +122,6 @@ class ScanCliDocker(
             "RLSECURE_SITE_KEY": self.RLSECURE_SITE_KEY,
         }
 
-    def _do_docker_rl_sync(
-        self,
-        *,
-        with_pack_safe: bool = False,
-    ) -> int:
-        command1 = [
-            "docker",
-            "run",
-            "--rm",
-            "--pull=always",
-            f"--volume={self.temp_dir_path}:/report",
-            "--env=RLSECURE_ENCODED_LICENSE",
-            "--env=RLSECURE_SITE_KEY",
-        ]
-
-        if self.store is not None:
-            s = f"--volume={self.store}:/rl-store"
-            command1.append(s)
-
-        if self.user_id > -1:
-            command1.append(
-                f"--user={self.user_id}:{self.group_id}",
-            )
-
-        reports = ",".join(self.reports_list)
-        command2 = [
-            f"{self.docker_image_name}",
-            "rl-sync",
-            f"--purl={self.purl}",
-            f"--report-format={reports}",
-            "--report-path=/report",
-        ]
-
-        if with_pack_safe is True:
-            command2.append("--pack-safe")  # requires rl-scanner > v3.3.1; 2025-01-16
-
-        if self.store is not None:
-            command2.append("--rl-store=/rl-store")
-
-        command = command1 + command2
-
-        return self._do_command(
-            what="docker_rl_sync",
-            command=command,
-            secrets=self._license_environment(),
-            answer_codes=DOCKER_SCAN_ANSWER_CODES,
-        )
-
     def do_scan_and_report(
         self,
         *,
@@ -201,25 +150,3 @@ class ScanCliDocker(
         result = self.make_scan_status_string()
 
         return self.scan_status, self.get_report_bundle_path(), result
-
-    def do_sync_and_report(
-        self,
-        *,
-        with_pack_safe: bool = False,
-    ) -> tuple[int, str, str | None]:
-        msg = "sync currently not implemented"
-        raise RuntimeError(msg)
-
-        self.scan_status = self._do_docker_rl_sync(
-            with_pack_safe=with_pack_safe,
-        )
-        if self.scan_status not in {0, 1}:
-            return self.scan_status, "", None
-
-        self.make_reports_bundle()
-        result = self.make_scan_status_string()
-
-        return self.scan_status, self.get_report_bundle_path(), result
-
-    def test_purl_exists(self) -> bool:
-        return False  # currently we cannot test for existing purls so always return False

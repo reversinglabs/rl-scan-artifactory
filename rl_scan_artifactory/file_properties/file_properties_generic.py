@@ -8,6 +8,7 @@ from typing import (
 from ..artifactory_api import ArtifactoryApi
 from ..constants import (
     META_STRING,
+    PROP_META_PRE,
 )
 from ..fileinfo import FileInfo
 
@@ -75,10 +76,9 @@ class FilePropertiesGeneric(
     def _get_properties(
         self,
     ) -> None:
-        if self.cli_args.get("portal") and not self.uri.lower().endswith(self.k):
-            self.file.properties = self.props
-            return
-
+        # Every file is read, in either mode: a file without a side-car may carry
+        # its purl data as RL.meta.* properties (R7.11), and only its properties
+        # can say so.
         logger.debug("investigate properties uri: %s", self.uri)
         self.props = self.artifactory_api.get_item_properties(
             file=self.file,
@@ -86,8 +86,8 @@ class FilePropertiesGeneric(
 
         # Nothing is derived from the uri here: a generic repository has no layout
         # to derive from. The name and version of a generic artifact come from its
-        # .rl_meta side-car (see ArtifactoryFileProcessorGeneric), which is read in
-        # a separate pass and does not go through this class.
+        # .rl_meta side-car or its RL.meta.* properties (see
+        # ArtifactoryFileProcessorGeneric), not through this class.
         #
         # Whatever generic.name / generic.version the repository itself carries is
         # therefore left alone; writing empty derived values here used to overwrite
@@ -103,17 +103,32 @@ class FilePropertiesGeneric(
         Decide if we process or skip:
 
         in portal mode
-            we only look at rl_meta files and process via the meta file
-            we skip therefore all non meta files
+            a .rl_meta side-car is a candidate, and stands for the file it describes;
+            so is a file carrying RL.meta.* properties (R7.11);
+            every other file is skipped
 
         in cli mode we process
         """
-        if self.cli_args.get("portal") and not self.uri.endswith(self.k):
-            logger.debug("SKIP: %s not a '%s' file: %s", self.p_type, self.k, self.uri)
+        if self.cli_args.get("portal") and not self.uri.endswith(self.k) and not has_meta_properties(self.props):
+            logger.debug(
+                "SKIP: %s not a '%s' file and no %s.* properties: %s",
+                self.p_type,
+                self.k,
+                PROP_META_PRE,
+                self.uri,
+            )
             self.file.simple = {}
             return True
 
-        # generic never skips on name/version: its purl comes from the rl_meta side-car,
-        # not from the item properties, so R4.2 does not apply here
+        # generic never skips on name/version: its purl comes from the rl_meta side-car
+        # or the RL.meta.* properties, not from the item properties, so R4.2 does not
+        # apply here
         self._populate_simple_data()
         return False
+
+
+def has_meta_properties(
+    properties: dict[str, Any],
+) -> bool:
+    """True when any RL.meta.* property is set, even an incomplete set (R7.11.3)."""
+    return any(key.startswith(f"{PROP_META_PRE}.") for key in properties)

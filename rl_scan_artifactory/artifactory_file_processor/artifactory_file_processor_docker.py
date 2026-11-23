@@ -457,7 +457,7 @@ class ArtifactoryFileProcessorDocker(
             report,
         )
 
-        sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
+        sync_requested = self.sync_requested()
 
         if exists_on_portal:
             msg = "purl exists on portal"
@@ -518,7 +518,7 @@ class ArtifactoryFileProcessorDocker(
         download_path = self.file.simple["download_path"]
         self.add_file_to_remove(download_path)
 
-        # sync_requested = self.cli_args.get("sync", False) or self.need_sync_datetime
+        # sync_requested = self.sync_requested()
         # for now just keep the downloaded file even if we dont actually need it for sync
         flag, info = self._make_tar_file_from_docker_parts(
             project=project,

@@ -187,10 +187,24 @@ ARTIFACTORY_KNOWN_PACKAGE_TYPES: dict[str, dict[str, Any]] = {
             ".namespace": "namespace",  # maven
         },
     },
-    "generic": {
-        "endswith": META_STRING,
+    # a gradle repository holds the same artifacts as maven, in the
+    # maven-2-default layout Artifactory gives it by default (R4.1.7)
+    "gradle": {
+        "endswith": ".jar",
         "what": {
-            # all values come from the `.rl_meta` file
+            ".name": "name",
+            ".version": "version",
+            ".arch": "arch",  # rpm
+            ".release": "release",  # rpm
+            ".namespace": "namespace",  # maven
+        },
+    },
+    "generic": {
+        # no "endswith": every file is listed, in either mode. In portal mode a
+        # file is scanned through its .rl_meta side-car or its RL.meta.*
+        # properties (R7.11), and only reading the file's properties can tell.
+        "what": {
+            # all values come from the `.rl_meta` file or the RL.meta.* properties
         },
     },
 }
@@ -257,6 +271,13 @@ PROP_SPECTRA_ASSURE_ON_SIDE_CAR: tuple[str, ...] = (
     PROP_NAME_SPECTRA_ASSURE_SHA256,
 )
 
+# A generic artifact without a .rl_meta side-car may carry the same purl data as
+# properties a person sets on it (R7.11). They are inputs: the integration reads
+# them, never writes them, and the obsolete-property cleanup never removes them.
+PROP_META_PRE: str = f"{SPECTRA_ASSURE_PRE}.meta"
+PROP_META_FIELDS: tuple[str, ...] = ("name", "version", "namespace", "architecture")
+PROP_META_MANDATORY: tuple[str, ...] = ("name", "version")
+
 # The prefix the integration used before RL. Everything under it was written by
 # this integration and nothing maintains it any more (R10.9).
 PROP_LEGACY_PRE: str = "Spectra.Assure"
@@ -264,6 +285,8 @@ PROP_LEGACY_PRE: str = "Spectra.Assure"
 # The repo_db key under which the generic pre pass maps each side-car uri to the
 # uri of the file it describes. Uris start with '/', so this cannot collide.
 REPO_DB_DESCRIBED_BY_SIDE_CAR: str = "__described_by_side_car__"
+# The side-cars the pre pass could not read; already recorded as failed (R12.1.1).
+REPO_DB_FAILED_SIDE_CARS: str = "__failed_side_cars__"
 
 PROP_SPECTRA_ASSURE_VALID_VALUES: dict[str, Any] = {
     PROP_NAME_SPECTRA_ASSURE_PROGRESS: PROGRESS_ALL,
@@ -312,6 +335,10 @@ DERIVED_PROPERTY_INFIX: str = "_derived_"
 JAR_TAIL: str = ".jar"
 # a maven artifact path is <namespace...>/<name>/<version>/<file>
 MAVEN_URI_MIN_SEGMENTS: int = 4
+# The one gradle repository layout the maven parser reads right, and the one
+# Artifactory gives a gradle repository by default. Any other layout
+# (ivy-default puts a [type]s folder before the file) would be misread (R4.1.7).
+GRADLE_LAYOUT: str = "maven-2-default"
 # a docker manifest path is [<org>/]<name>/<version>/<manifest json>
 DOCKER_URI_MIN_SEGMENTS: int = 3
 

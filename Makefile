@@ -28,7 +28,8 @@ PY_FILES := *.py \
 		rl_scan_artifactory/*.py \
 		rl_scan_artifactory/*/*.py \
 		tools/*.py \
-		tests/*.py
+		tests/*.py \
+		livetest/*.py
 
 MYPY_INSTALL := -r requirements.txt \
 	types-requests
@@ -37,7 +38,7 @@ MYPY_INSTALL := -r requirements.txt \
 # past runs, and patch files. The captured output holds the messages as they were
 # spelled at the time and the names of whatever was scanned; a patch file holds
 # the old spelling on its '-' lines, so correcting it would break the patch.
-CODESPELL_SKIP := --skip="./$(VENV),./.git,./keep,*.log,*.1,*.2,*.patch,*.diff,./.mypy_cache,./.ruff_cache,./doc/*.svg"
+CODESPELL_SKIP := --skip="./$(VENV),./.git,./keep,*.log,*.1,*.2,*.patch,*.diff,./.mypy_cache,./.ruff_cache,./doc/*.svg,./livetest/work"
 
 .PHONEY: all clean prep test cleanupVenv dead-code spell
 

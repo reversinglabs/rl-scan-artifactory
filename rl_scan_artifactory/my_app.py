@@ -19,15 +19,18 @@ from .artifactory_file_processor.artifactory_file_processor_common import obsole
 from .artifactory_repo_info import ArtifactoryRepoInfo
 from .artifactory_repo_processor import ArtifactoryRepoProcessor
 from .constants import (
+    ARTIFACTORY_KNOWN_PACKAGE_TYPES,
     CLI_REPORTS_FILE_TAIL,
     DOCKER_LIST_MANIFEST_FILE,
     EXIT_FATAL,
     EXIT_ITEM_FAILURES,
     EXIT_OK,
+    GRADLE_LAYOUT,
     META_STRING,
     PROCESS_FILE_FAILED,
     PROCESS_FILE_SKIP,
     REPO_DB_DESCRIBED_BY_SIDE_CAR,
+    REPO_DB_FAILED_SIDE_CARS,
     WRITABLE_REPO_TYPES,
 )
 from .exceptions import SpectraAssureInvalidAction
@@ -119,6 +122,7 @@ class MyApp(
             "nuget": FilePropertiesNuget,
             "rpm": FilePropertiesRpm,
             "maven": FilePropertiesMaven,
+            "gradle": FilePropertiesMaven,
             "generic": FilePropertiesGeneric,
         }
         if p_type in dispatch:
@@ -274,6 +278,10 @@ class MyApp(
         if uri_l.endswith(CLI_REPORTS_FILE_TAIL):
             logger.debug("skip report file %s", uri_l)
             return PROCESS_FILE_SKIP
+
+        if uri in repo_db.get(REPO_DB_FAILED_SIDE_CARS, ()):
+            # the pre pass could not read it and has recorded it already (R12.1.1)
+            return PROCESS_FILE_FAILED
 
         msg = f"Inspecting {repo.name}:{uri}"
         self.my_print(msg)
@@ -431,39 +439,60 @@ class MyApp(
         arp: ArtifactoryRepoProcessor,
         repo_db: dict[str, Any],
     ) -> None:
-        """Find all files ending in .rl_meta and extract the meta info"""
+        """Find all files ending in .rl_meta and extract the meta info.
+
+        One side-car that cannot be read fails that side-car, not the repository
+        (R12.1.1): it is recorded here, and the main loop does not try it again.
+        """
         repo = arp.get_repo()
-        p_type = arp.p_type
 
         for artifact_item in arp.process():
             uri = artifact_item.get("uri", "")
             if not uri.lower().endswith(META_STRING):
                 continue
 
-            afp = self._get_my_afp(  # ArtifactoryFileProcessor
-                p_type=p_type,
-                repo=repo,
-                artifact_item=artifact_item,
-                repo_db=repo_db,
-            )
+            try:
+                self._read_one_side_car(arp=arp, artifact_item=artifact_item, repo_db=repo_db)
+            except Exception as e:
+                self._record_failed_item(repo=repo, uri=uri, e=e)
+                repo_db.setdefault(REPO_DB_FAILED_SIDE_CARS, set()).add(uri)
 
+    def _read_one_side_car(
+        self,
+        *,
+        arp: ArtifactoryRepoProcessor,
+        artifact_item: dict[str, Any],
+        repo_db: dict[str, Any],
+    ) -> None:
+        """Read one side-car into repo_db, keyed by the uri of the file it describes."""
+        uri = artifact_item.get("uri", "")
+        afp = self._get_my_afp(  # ArtifactoryFileProcessor
+            p_type=arp.p_type,
+            repo=arp.get_repo(),
+            artifact_item=artifact_item,
+            repo_db=repo_db,
+        )
+
+        try:
             zz = afp.extract_generic_meta_info()
-            meta = zz.get("meta")
+        finally:
+            afp.remove_my_files()
+        meta = zz.get("meta")
 
-            msg = f"Uri: {uri} -> {zz}"
-            if meta is not None and meta.get("path"):
-                k = "/"
-                uri_path = k.join(uri.split(k)[:-1])
-                file = uri_path + k + meta["path"]
-                # the hash of the file described, to compare with the portal's (R10.7.4)
-                zz["sha2"] = arp.sha2_by_uri.get(file)
-                # set the path of the file in the meta to the same path as the current meta file
-                repo_db[file] = zz
-                repo_db.setdefault(REPO_DB_DESCRIBED_BY_SIDE_CAR, {})[uri] = file
-                msg = f"Uri: {uri} -> {file} {zz}"
+        msg = f"Uri: {uri} -> {zz}"
+        if meta is not None and meta.get("path"):
+            k = "/"
+            uri_path = k.join(uri.split(k)[:-1])
+            file = uri_path + k + meta["path"]
+            # the hash of the file described, to compare with the portal's (R10.7.4)
+            zz["sha2"] = arp.sha2_by_uri.get(file)
+            # set the path of the file in the meta to the same path as the current meta file
+            repo_db[file] = zz
+            repo_db.setdefault(REPO_DB_DESCRIBED_BY_SIDE_CAR, {})[uri] = file
+            msg = f"Uri: {uri} -> {file} {zz}"
 
-            logger.debug(msg)
-            logger.debug("%s %s", uri, zz)
+        logger.debug(msg)
+        logger.debug("%s %s", uri, zz)
 
     def _repo_docker_extract_list_manifest_info(
         self,
@@ -530,7 +559,7 @@ class MyApp(
     ) -> tuple[str, bool] | None:
         """The reason not to process this repository, and whether it is verbose only.
 
-        None to carry on. The two repository problems are always announced; the
+        None to carry on. The three repository problems are always announced; the
         two that are a consequence of how this run was invoked are only announced
         with --verbose, because a run over many repositories would otherwise
         repeat them for each one.
@@ -549,6 +578,17 @@ class MyApp(
                 ],
             )
             return t, False
+
+        package_type = repo.package_type.lower()
+        if package_type not in ARTIFACTORY_KNOWN_PACKAGE_TYPES:
+            # it used to be listed as empty: the run said nothing and found nothing
+            # (R11.6.9)
+            supported = ", ".join(sorted(ARTIFACTORY_KNOWN_PACKAGE_TYPES))
+            return f"package type '{package_type}' is not supported (supported: {supported})", False
+
+        if package_type == "gradle" and repo.layout != GRADLE_LAYOUT:
+            # the maven path parser would misread it (R4.1.7)
+            return f"gradle repository layout '{repo.layout}' is not supported (supported: {GRADLE_LAYOUT})", False
 
         if self._is_cli_and_remote_and_no_reports_location_specified(repo):
             t = "processing with cli is not supported, missing report location: we cannot upload the report"

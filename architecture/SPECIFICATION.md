@@ -8,10 +8,15 @@ The executable form of this document is `tests/`. Every numbered rule has at
 least one test, and a rule the code does not satisfy would carry an
 `xfail(strict=True)` test so it turns red the moment it starts passing.
 
-**Current state: 1024 passing tests, no xfails, no open deviations.** `make all`
+**Current state: 1098 passing tests, no xfails, no open deviations.** `make all`
 also checks formatting, types (`mypy --strict`), complexity (nothing above 10),
 unreachable code and spelling. §11 lists the Artifactory endpoints used, for
 checking against the official OpenAPI reference.
+
+What the unit tests cannot show - a real Artifactory, rl-secure, the
+rl-scanner image and the Portal together - is covered by `livetest/`: one
+`run.sh all` per development step, with `check.py` comparing every item against
+the expected result in `livetest/README.md`, rule by rule.
 
 ---
 
@@ -107,7 +112,11 @@ flowchart TD
     cfg -- no --> skip1[REPO SKIP<br/>does not exist or not readable]:::skip
     cfg -- yes --> rtype{type is<br/>local or remote?}
     rtype -- no --> skip2[REPO SKIP<br/>unsupported type]:::skip
-    rtype -- yes --> cliok{cli, and the reports<br/>have somewhere to go?}
+    rtype -- yes --> ptype{package type<br/>supported?}
+    ptype -- no --> skip4[REPO SKIP<br/>unsupported package type]:::skip
+    ptype -- yes --> glayout{gradle: the maven-2-default<br/>layout?}
+    glayout -- no --> skip5[REPO SKIP<br/>unsupported gradle layout]:::skip
+    glayout -- "yes, or not gradle" --> cliok{cli, and the reports<br/>have somewhere to go?}
     cliok -- no --> skip3[REPO SKIP<br/>verbose only]:::skip
     cliok -- yes --> pre{package type?}
 
@@ -157,7 +166,7 @@ flowchart TD
     d1 -- "anything else" --> skipo[skip: not relevant]:::skip
     d1 -- "manifest.json" --> earlier
 
-    type -- "generic" --> g1[purl from the .rl_meta side-car<br/>portal, or from the file name for cli]
+    type -- "generic" --> g1[purl from the .rl_meta side-car,<br/>else the RL.meta.* properties,<br/>else portal skips, cli uses the file name]
     g1 --> earlier
     type -- "everything else" --> n1[purl from the name mangler<br/>for that package type]
     n1 --> earlier
@@ -169,7 +178,9 @@ flowchart TD
     scanned -- "no, uploaded only" --> go
     scanned -- yes --> stale{last scan<br/>older than 14 days?}
     stale -- no --> skipa[skip: already scanned<br/>reports the stored result]:::skip
-    stale -- yes --> sync[sync instead of scan]
+    stale -- yes --> nosync{cli-docker, or the generic<br/>cli placeholder purl?}
+    nosync -- yes --> skipn[skip: already scanned<br/>never synced]:::skip
+    nosync -- no --> sync[sync instead of scan]
     sync --> go
 
     go{backend?}
@@ -187,9 +198,9 @@ Docker cannot skip the download even when the answer is "already scanned": the
 purl needs the architecture, the architecture is in the config blob, and the
 config blob is only reachable by downloading the manifest and following it.
 
-For generic in **cli** mode the purl is the repository name and the file name, so
-every package in the repository would share it — which is why a sync is refused
-there and only there.
+For generic in **cli** mode without a side-car or `RL.meta.*` properties the purl
+is the placeholder `<repo>/<file name>@v0`. It names a file, not a package
+version, so it is never synced - there and only there (R7.11.6).
 
 ---
 
@@ -331,9 +342,10 @@ Per type:
 | default | any file with `<ptype>.name` and `<ptype>.version` | read from Artifactory |
 | nuget | uri ends with `nupkg` | read from Artifactory; `nuget.id` is the name |
 | maven | uri ends with `jar` | **derived from the uri**, Artifactory has none |
+| gradle | as maven (R4.1.7) | as maven, stored under `gradle.` |
 | rpm | any | read; if `rpm.metadata.name`/`.version` are absent, `touch_rpm_info_uri()` then re-read |
 | docker | uri ends with `manifest.json` | read; name/version come from `docker.repoName` / `docker.manifest`, and are also derived from the uri as a fallback (R4.3.x) |
-| generic | governed by a `.rl_meta` side-car file | read; **nothing is derived**, because a generic repository has no layout to derive from — see §7 |
+| generic | governed by a `.rl_meta` side-car file or `RL.meta.*` properties | read, for every file in either mode (R7.11.5); **nothing is derived**, because a generic repository has no layout to derive from — see §7 |
 
 ### Maven uri layout (R4.1.x)
 
@@ -357,6 +369,17 @@ or the two spellings drift apart and the property is silently never read.
 
 Example: `/org/apache/logging/log4j/log4j-api/2.12.1/log4j-api-2.12.1.jar`
 → namespace `org.apache.logging.log4j`, name `log4j-api`, version `2.12.1`.
+
+**R4.1.7** A `gradle` repository is read exactly as maven (same candidate test,
+same parser, same name mangler), with the derived properties stored under
+`gradle.<DERIVED_PROPERTY_INFIX>.*` so simple data, which reads properties by
+package type (R5.1), finds them. Its layout (`repoLayoutRef`) must be
+`maven-2-default`, the one Artifactory gives a gradle repository by default
+(groupId as folders, `org/apache/logging/log4j/...`), so the same artifact gets
+the same purl as in a maven repository. Any other layout is a `REPO SKIP`
+naming the layout and the supported one, always printed: `ivy-default` puts a `[type]s` folder before the
+file, which the parser would take for the version. Maven repositories are not
+checked for their layout, as before.
 
 ### rpm property recovery (R4.2.x)
 
@@ -385,12 +408,12 @@ ends with one of the known suffixes. An arbitrary middle component is allowed,
 which is what makes `rpm.metadata.name` and `maven._derived_.name` both work.
 
 **R5.2** Suffix map: `.name` → name, `.id` → name (nuget), `.version` → version,
-`.arch` → arch (rpm), `.release` → release (rpm), `.namespace` → namespace (maven).
+`.arch` → arch (rpm), `.release` → release (rpm), `.namespace` → namespace (maven, gradle).
 
 **R5.3** The repository package type is translated to the property prefix where
 they differ: `debian` → `deb`, `gems` → `gem`.
 
-**R5.4** maven only extracts from `.jar` files; anything else yields `{}`.
+**R5.4** maven and gradle only extract from `.jar` files; anything else yields `{}`.
 
 **R5.5** docker only extracts from `manifest.json`; anything else yields `{}`.
 `docker.repoName` → name, `docker.manifest` → version.
@@ -529,6 +552,61 @@ full set goes there (minus the two portal-only properties, R10.6).
 Only that property: `RL.progress` and `RL.sha256` on a side-car are a portal
 run's, which reads them to decide whether to skip (R10.8), so a cli run leaves
 them as they are. A run that skipped or failed the file writes nothing there.
+
+### Purl data as properties instead of a side-car (R7.11.x)
+
+A side-car has to be created and deployed next to every artifact. A person may
+instead set the same data as properties on the artifact itself.
+
+**R7.11.1** A generic file may carry its purl data as properties:
+`RL.meta.name` and `RL.meta.version` (mandatory), `RL.meta.namespace` and
+`RL.meta.architecture` (optional). The first value of each is used. They make
+the purl exactly as the side-car keys of the same name do: same escaping and
+separators (R7.7, R7.9), same shape (R7.8). `path` and `sha256` have no property:
+the file is the one the properties are on, and Artifactory holds its hash. Any
+other `RL.meta.*` name is ignored.
+**R7.11.2** A side-car wins. A file the generic pre pass found a side-car for
+(R12.1) gets its purl from the side-car, and its `RL.meta.*` properties are
+ignored; in portal mode the file is skipped as an item of its own, because it is
+handled when the run reaches its side-car. `RL.meta.*` on a side-car itself is
+ignored too.
+**R7.11.3** A file with any `RL.meta.*` property but without a non-empty
+`RL.meta.name` or `RL.meta.version` raises `SpectraAssureInvalidAction` naming
+the missing properties, in either mode, like an incomplete side-car (R7.3). The
+item is then a failed item (R12.3) and the run exits `103` (R12.4); it is
+neither skipped quietly nor given the cli placeholder purl. As for a side-car,
+the check is made when the purl is needed: an item that stops earlier, because
+an earlier run recorded it as scanned (R10.2), reports that result and raises
+nothing. A cli item that is due for a sync (R12.7.3) needs its purl, so there
+the incomplete set raises.
+**R7.11.4** In portal mode a file with `RL.meta.*` properties and no side-car is
+a candidate, and it is both what is found and what is scanned: it is downloaded,
+verified against its own `sha2`, uploaded, and the full `RL.*` result is written
+on it, as for any other package type. Its own `sha2` is the digest asked of the
+Portal (R10.7) and recorded as `RL.sha256` (R10.8). A sync works as for a
+side-car.
+**R7.11.5** So that its properties can be read, every file in a generic
+repository is listed and inspected in either mode; there is no file name filter
+for generic. In portal mode a file with neither a side-car nor `RL.meta.*`
+properties is skipped, as before, by the candidate check ("skip: not a
+candidate for inspection"); that is the only place it is skipped, and the purl
+step treats such a file as an invariant error.
+**R7.11.6** In cli mode the purl comes from the side-car (R7.11.2), else from the
+`RL.meta.*` properties, else it is the placeholder
+`<repo>/<file name>@v0`.
+**R7.11.6.1** A purl from a side-car or from `RL.meta.*` is synced like that of
+any other package type: the automatic sync of an old scan (R12.7.3) and an
+explicit `--sync`, through the store without a download (R12.7.4) and with the
+digest check of R12.7.5. This holds for `--cli`; `--cli-docker` never syncs
+(R12.7.2).
+**R7.11.6.2** The placeholder is never synced. An old scan stops as already
+processed, with the reason "sync not possible with cli: no .rl_meta side-car
+and no RL.meta.* properties"; an explicit `--sync` (which implies `-I`, R12.7.1)
+scans the file again instead. Before 1.2.0 a sync was refused for every generic
+cli item, although an explicit `--sync` slipped through and synced even the
+placeholder.
+**R7.11.7** `RL.meta.*` properties are input a person sets. The integration never
+writes them and never removes them (R10.9.2), on any item.
 
 ## 8. Docker manifests
 
@@ -689,8 +767,8 @@ as it always did.
 | Type | Hash |
 |---|---|
 | default | the item's own `sha2` from the listing; a missing one is not a hash |
-| generic, portal | the `sha2` of the file the side-car describes (R10.7.4), on both the file and the side-car |
-| generic, cli | the item's own `sha2`: there is no side-car |
+| generic, portal | the `sha2` of the file the side-car describes (R10.7.4), on both the file and the side-car; for a file with `RL.meta.*` properties its own `sha2` (R7.11.4) |
+| generic, cli | the item's own `sha2`: a cli run scans the file itself, never through its side-car |
 | docker | none: what is scanned is a bundle assembled here, so `RL.sha256` is not written |
 
 **R10.8.5** For generic the properties are read before the side-car is, so the
@@ -711,12 +789,13 @@ ReversingLabs integration uses `secure.software.`. Obsolete therefore means:
 - anything under `Spectra.Assure.`, the prefix used before `RL.`;
 - any `RL.*` name outside what the item carries (`PROP_SPECTRA_ASSURE_ALL`, or
   `PROP_SPECTRA_ASSURE_ON_SIDE_CAR` for a generic `.rl_meta` side-car) and
-  other than `RL.noscan`. That covers the scan result 1.0.4 wrote on side-cars,
-  which R7.10 no longer does, and any name an earlier version wrote and this one
-  does not.
+  other than `RL.noscan` and the `RL.meta.*` input properties (R7.11.7). That
+  covers the scan result 1.0.4 wrote on side-cars, which R7.10 no longer does,
+  and any name an earlier version wrote and this one does not.
 
 **R10.9.3** `RL.noscan` always stays: it is read on every item (R10.1) and a
-person may have set it. Nothing outside the two prefixes is touched.
+person may have set it. `RL.meta.*` always stays too (R7.11.7). Nothing outside
+the two prefixes is touched.
 **R10.9.4** The delete goes where the properties were written: the item itself,
 or for docker its directory, recursively. A refused delete is logged by the api
 and left for a later run; the item is processed either way.
@@ -757,10 +836,10 @@ holds no hash of it. The hashes are then not even fetched.
 |---|---|---|
 | default | `self.file.sha2` | yes, the artifact is one file with a known hash |
 | docker | `None` | yes, see R10.7.3 |
-| generic | the `sha2` of the file the side-car describes, else `None` | yes, see below |
+| generic | the `sha2` of the file the side-car describes, else `None`; a file with `RL.meta.*` properties its own `sha2` (R7.11.4) | yes, see below |
 
-For generic, `self.file` is the `.rl_meta` side-car, so its own `sha2` is the
-wrong hash. The repository listing carries `sha2` for every file; the processor
+For a generic side-car, `self.file` is the `.rl_meta` file, so its own `sha2`
+is the wrong hash. The repository listing carries `sha2` for every file; the processor
 keeps them all, the generic pre pass stores the described file's hash in its
 `repo_db` entry, and the side-car's processor passes that. A described file
 that is not in the listing has no hash, and compares nothing (R10.7.3).
@@ -844,6 +923,11 @@ once per artifact.
 repository does not exist, is not readable, or the request failed. That is
 reported as its own `REPO SKIP` reason — "repository does not exist, or we may
 not read its configuration" — and never as an unsupported type.
+**R11.6.9** A repository whose package type is not one the integration handles
+(`ARTIFACTORY_KNOWN_PACKAGE_TYPES`, compared without case) - Ivy, Conan
+and so on - is skipped with a `REPO SKIP` line naming its type and the
+supported ones, always printed. It used to be listed as empty, so the run found
+nothing and said nothing.
 
 **R11.6.8** That skip is the **only** message about it at the default log level.
 The status the server gave is logged by the lookup at **debug**, where it still
@@ -920,7 +1004,15 @@ what keeps the other types out of that path.
 
 **R12.1** Before the main loop over a generic repository, every `.rl_meta`
 side-car in it is read into `repo_db`, so an artifact is matched to its side-car
-regardless of the order Artifactory lists them in.
+regardless of the order Artifactory lists them in. That is also what lets a
+side-car win over `RL.meta.*` properties (R7.11.2) when the file comes first.
+**R12.1.1** A side-car the pre pass cannot read - for example one missing a
+mandatory key (R7.3) - fails that side-car only: it is recorded as a failed item
+(R12.3.1), its downloaded copy is removed, the pre pass carries on with the
+next one, and the main loop does not process it again. It used to raise out of
+the pre pass and fail the whole repository (R12.3.2), so no file in it was
+scanned. The file it names then has no side-car, and is handled as one without
+(R7.11).
 **R12.2** The same holds for docker and `list.manifest.json` (R8.10.1).
 Artifactory gives no ordering guarantee, and `sha256__` sorts before common tags
 such as `v1.2.3`, so an opportunistic in-loop collection would leave those
@@ -1093,7 +1185,7 @@ lists, and no other: an option a command does not know may make it fail.
 | `rl-safe pack` | no | yes, not on that site; kept as it was |
 
 The docker image's `rl-scan` lists neither ([docker-image](https://docs.secure.software/cli/integrations/docker-image)),
-so the docker backend passes neither; `rl-sync` is not documented there.
+so the docker backend passes neither. The image has no sync command (R12.7.2).
 `test_scan_cli_local.py` holds the same table and fails when a command is
 added without an entry.
 
@@ -1118,7 +1210,7 @@ than a failure, and only the others are logged as errors:
 | most | `0` | anything else went wrong |
 | `status --return-status` | `0`, `1` | the scan result itself: 0 pass, 1 fail |
 | `status` (does this purl exist) | any | the code *is* the answer; "not scanned yet" is the ordinary first-run case |
-| the **docker** scan and sync | `0`, `1` | the image returns the verdict itself; only 101 is a real error |
+| the **docker** scan | `0`, `1` | the image returns the verdict itself; only 101 is a real error |
 
 The docker row is the one that is easy to get wrong. The local rl-secure returns
 0 from a scan and the verdict comes from a separate `status` call, so the two
@@ -1152,12 +1244,25 @@ is not needed.
 
 **R12.7.1** `--sync` implies `--ignore-artifactory-properties` (R12.5), because a
 re-analysis must not be skipped by a property saying the work was already done.
-**R12.7.2** `--sync` with `--cli-docker` is refused at startup: a docker based
-scan has an ephemeral store, a new image means a new store, and the combination
-is not supported.
+**R12.7.2** `--sync` with `--cli-docker` is refused at startup. Without
+`--cli-rlstore-path` the store lives inside the container and is gone after the
+scan. With it, the store keeps the history (each scan uses `--replace`), but the
+`reversinglabs/rl-scanner` image offers only `rl-scan`, `rl-scan-url`,
+`rl-scan-purl`, `rl-scan-docker` and `rl-prune`: no sync, and no way to ask the
+store whether a purl is there. rl-secure is installed when a command starts, so
+it cannot be called directly either. The docker backend therefore always scans,
+whatever it is asked; the unused `rl-sync` call it had is gone.
+**R12.7.2.1** The automatic sync of R12.7.3 is not used with `--cli-docker`
+either: an item an earlier run recorded as scanned stays "already processed",
+however old the scan. The check used to look for the option under the wrong
+key (`cli-docker` instead of `cli_docker`) and never matched, so a scan older
+than 14 days was sent to a sync, and without `--cli-rlstore-path` that item
+failed with "store is None" on every later run.
 **R12.7.3** Two things ask for a sync and they are both honoured: the explicit
 `--sync`, and `need_sync_datetime`, set when the artifact is already known and a
-re-analysis is cheaper than an upload.
+re-analysis is cheaper than an upload. Both go through `sync_requested()`. The
+exceptions: `--cli-docker` never syncs (R12.7.2, R12.7.2.1), and a generic cli
+item with the placeholder purl never syncs (R7.11.6.2).
 
 ### Sync without a download (R12.7.4.x)
 

@@ -136,14 +136,6 @@ def test_the_child_keeps_the_rest_of_our_environment(
     assert env["SOME_UNRELATED_SETTING"] == "keep me"
 
 
-def test_no_secret_appears_in_the_sync_command(recorder: Recorder, tmp_path: Any) -> None:
-    scan = scanner(tmp_path)
-    scan._do_docker_rl_sync()
-
-    assert not any(LICENSE in argument for argument in recorder.command)
-    assert not any(SITE_KEY in argument for argument in recorder.command)
-
-
 # ------------------------------------------------------------- the command
 
 
@@ -185,18 +177,6 @@ def test_the_purl_and_the_reports_are_passed(recorder: Recorder, tmp_path: Any) 
     assert "--report-format=rl-json,rl-html" in recorder.command
 
 
-def test_the_pull_flag_is_one_argument(recorder: Recorder, tmp_path: Any) -> None:
-    """It read '--pull allways': one argv element with a space in it, and misspelled.
-
-    With a list and no shell that reaches docker as a single unknown argument.
-    """
-    scan = scanner(tmp_path)
-    scan._do_docker_rl_sync()
-
-    assert "--pull=always" in recorder.command
-    assert not any(" " in argument for argument in recorder.command)
-
-
 def test_a_store_adds_a_volume_and_a_flag(recorder: Recorder, tmp_path: Any) -> None:
     run_scan(tmp_path, store="/opt/rl-store")
     assert "--volume=/opt/rl-store:/rl-store" in recorder.command
@@ -209,21 +189,6 @@ def test_no_store_adds_neither(recorder: Recorder, tmp_path: Any) -> None:
 
 
 # ------------------------------------------------------------ the results
-
-
-def test_the_scan_and_the_sync_name_themselves_apart(
-    recorder: Recorder,
-    tmp_path: Any,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Both used the name 'docker_rl_scan', so a sync overwrote the scan's record."""
-    with caplog.at_level(logging.DEBUG):
-        scan = scanner(tmp_path)
-        scan._do_docker_rl_scan(file_path=str(tmp_path / "artifact.tgz"))
-        scan._do_docker_rl_sync()
-
-    assert "docker_rl_scan exit code" in caplog.text
-    assert "docker_rl_sync exit code" in caplog.text
 
 
 def test_a_failure_is_logged_with_the_reason(
@@ -374,20 +339,6 @@ def test_anything_else_is_still_a_failure(
         scan._do_docker_rl_scan(file_path=str(tmp_path / "artifact.tgz"))
 
     assert "the reason" in caplog.text
-
-
-def test_the_sync_answers_the_same_way(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    rec = Recorder(returncode=1)
-    monkeypatch.setattr(subprocess, "run", rec)
-
-    with caplog.at_level(logging.ERROR):
-        scanner(tmp_path)._do_docker_rl_sync()
-
-    assert caplog.text == ""
 
 
 def test_the_local_scanner_does_not_share_this() -> None:

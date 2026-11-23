@@ -31,7 +31,7 @@ class ScanCli:
             if not pathlib.Path(self.rlsecure_dir).is_dir():
                 raise RuntimeError(msg)
 
-    def _cli_docker_scan_or_sync(
+    def _cli_docker_scan(
         self,
         *,
         file_path: str,
@@ -52,7 +52,9 @@ class ScanCli:
 
         self.temp_dir_name = tempfile.mkdtemp()
 
-        # currently no external rl-store so no sync possible
+        # The rl-scanner image has no sync command and no way to ask the store
+        # about a purl, so docker always scans; with --cli-rlstore-path the
+        # store keeps the history (R12.7.2).
         self.scanner = ScanCliDocker(
             purl=purl,
             encoded_license=encoded_license,
@@ -62,19 +64,14 @@ class ScanCli:
             reports_list=self.cli_args.get("reports_requested", []),
         )
 
-        if sync_requested and not store:
-            msg = "store is None"
-            raise RuntimeError(msg)
+        if sync_requested:
+            # refused at startup (R12.7.2) and never automatic (R12.7.2.1)
+            logger.debug("docker cannot sync %s; scanning it", purl)
 
-        if sync_requested is True and self.scanner.test_purl_exists():
-            ret, report_bundle_path, result = self.scanner.do_sync_and_report(
-                with_pack_safe=self.cli_args.get("pack_safe", False),
-            )
-        else:
-            ret, report_bundle_path, result = self.scanner.do_scan_and_report(
-                file_path=file_path,
-                with_pack_safe=self.cli_args.get("pack_safe", False),
-            )
+        ret, report_bundle_path, result = self.scanner.do_scan_and_report(
+            file_path=file_path,
+            with_pack_safe=self.cli_args.get("pack_safe", False),
+        )
 
         logger.debug("%s %s %s", ret, report_bundle_path, result)
 
@@ -142,7 +139,7 @@ class ScanCli:
         logger.debug("%s", self.cli_args.get("cli_report_types"))
 
         if self.cli_args.get("cli_docker") is True:
-            return self._cli_docker_scan_or_sync(
+            return self._cli_docker_scan(
                 file_path=file_path,
                 purl=purl,
                 encoded_license=self.cli_args.get("rlsecure_encoded_license", ""),

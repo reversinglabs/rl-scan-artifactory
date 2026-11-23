@@ -4,7 +4,7 @@
 Characterization tests for `_run_one_repo_all_artifacts` (complexity 14), so it
 can be restructured without changing what it does. Nothing here asserted its
 behaviour before: the containment tests replace the whole method with a fake, so
-the four skip reasons, the two pre passes and the item loop were untested.
+the skip reasons, the two pre passes and the item loop were untested.
 
 `ArtifactoryRepoProcessor` is faked; everything else is the real code.
 """
@@ -47,12 +47,13 @@ def repo_info(
     name: str = REPO,
     repo_type: str = "local",
     package_type: str = "pypi",
+    layout: str = "simple-default",
 ) -> ArtifactoryRepoInfo:
     return ArtifactoryRepoInfo(
         name=name,
         repo_type=repo_type,
         package_type=package_type,
-        layout="simple-default",
+        layout=layout,
     )
 
 
@@ -105,7 +106,7 @@ def run(instance: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     return instance
 
 
-# --------------------------------------------------------- the four skips
+# --------------------------------------------------------- the five skips
 
 
 def skipped(instance: Any) -> bool:
@@ -138,6 +139,76 @@ def test_an_unsupported_repository_type_is_skipped(
 
     assert skipped(instance)
     assert "only local, remote repositories are supported" in caplog.text
+
+
+@pytest.mark.parametrize("package_type", ["ivy", "Ivy", "conan", "sbt"])
+def test_an_unsupported_package_type_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    package_type: str,
+) -> None:
+    """R11.6.9: it used to be listed as empty, so the run found nothing and said nothing."""
+    instance = app(repo=repo_info(package_type=package_type), uris=["/a.jar"])
+
+    with caplog.at_level(logging.WARNING):
+        run(instance, monkeypatch)
+
+    assert skipped(instance)
+    assert f"package type '{package_type.lower()}' is not supported" in caplog.text
+    assert "maven" in caplog.text  # the supported ones are named
+    assert any("REPO SKIP" in line for line in instance.printed)
+
+
+@pytest.mark.parametrize("package_type", ["maven", "Maven", "generic", "Docker"])
+def test_a_supported_package_type_is_not_skipped_whatever_its_case(
+    monkeypatch: pytest.MonkeyPatch,
+    package_type: str,
+) -> None:
+    instance = app(repo=repo_info(package_type=package_type), uris=["/a.jar"])
+    run(instance, monkeypatch)
+
+    assert not skipped(instance)
+
+
+@pytest.mark.parametrize("package_type", ["gradle", "Gradle"])
+def test_a_gradle_repository_in_the_maven_2_default_layout_is_not_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+    package_type: str,
+) -> None:
+    """R4.1.7: the layout Artifactory gives a gradle repository by default."""
+    instance = app(repo=repo_info(package_type=package_type, layout="maven-2-default"), uris=["/a.jar"])
+    run(instance, monkeypatch)
+
+    assert not skipped(instance)
+
+
+@pytest.mark.parametrize("layout", ["ivy-default", "gradle-default", "my-custom-layout", ""])
+def test_a_gradle_repository_in_another_layout_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    layout: str,
+) -> None:
+    """R4.1.7: ivy-default puts a [type]s folder before the file; the maven parser
+    would take that folder for the version."""
+    instance = app(repo=repo_info(package_type="gradle", layout=layout), uris=["/a.jar"])
+
+    with caplog.at_level(logging.WARNING):
+        run(instance, monkeypatch)
+
+    assert skipped(instance)
+    assert f"gradle repository layout '{layout}' is not supported" in caplog.text
+    assert "(supported: maven-2-default)" in caplog.text
+    assert any("REPO SKIP" in line for line in instance.printed)
+
+
+def test_a_maven_repository_layout_is_not_checked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only gradle is checked: maven repositories behave as before 1.3.0."""
+    instance = app(repo=repo_info(package_type="maven", layout="my-custom-layout"), uris=["/a.jar"])
+    run(instance, monkeypatch)
+
+    assert not skipped(instance)
 
 
 def test_a_cli_run_on_a_remote_repo_without_a_report_location_is_skipped(

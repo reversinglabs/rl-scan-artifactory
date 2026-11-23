@@ -32,7 +32,9 @@ import pathlib
 import sys
 from collections.abc import Iterable, Iterator
 
-DEFAULT_ROOTS: tuple[str, ...] = (".", "rl_scan_artifactory", "tools", "tests")
+DEFAULT_ROOTS: tuple[str, ...] = (".", "rl_scan_artifactory", "tools", "tests", "livetest")
+# roots read without their subdirectories: livetest/work holds a venv after a run
+FLAT_ROOTS: frozenset[pathlib.Path] = frozenset({pathlib.Path("."), pathlib.Path("livetest")})
 CONSTANTS_FILE: str = "rl_scan_artifactory/constants.py"
 ENTRY_POINT_NAMES: frozenset[str] = frozenset({"main", "process"})
 # ast.NodeVisitor dispatches on the node class name, so these are never named
@@ -302,7 +304,7 @@ def python_files(
         if not base.exists():
             continue
 
-        found = base.glob("*.py") if base == pathlib.Path(".") else base.rglob("*.py")
+        found = base.glob("*.py") if base in FLAT_ROOTS else base.rglob("*.py")
         for path in found:
             if "__pycache__" in path.parts:
                 continue

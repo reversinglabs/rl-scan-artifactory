@@ -78,6 +78,7 @@ class FilePropertiesCommon:
     ) -> dict[str, Any]:
         dispatch = {
             "maven": SimpleDataMaven,
+            "gradle": SimpleDataMaven,
             "docker": SimpleDataDocker,
         }
         if self.p_type is None:

@@ -27,7 +27,12 @@ from rl_scan_artifactory.artifactory_file_processor.artifactory_file_processor_g
     ArtifactoryFileProcessorGeneric,
 )
 from rl_scan_artifactory.artifactory_repo_processor import ArtifactoryRepoProcessor
-from rl_scan_artifactory.constants import REPO_DB_DESCRIBED_BY_SIDE_CAR
+from rl_scan_artifactory.constants import (
+    PROCESS_FILE_FAILED,
+    REPO_DB_DESCRIBED_BY_SIDE_CAR,
+    REPO_DB_FAILED_SIDE_CARS,
+)
+from rl_scan_artifactory.exceptions import SpectraAssureInvalidAction
 from rl_scan_artifactory.my_app import MyApp
 
 from .conftest import make_file, make_repo
@@ -57,9 +62,11 @@ def repo_processor(*, cli: bool = False) -> Any:
 # ------------------------------------------------ the listing keeps the hashes
 
 
-def test_the_listing_hands_on_only_the_side_cars() -> None:
+def test_the_listing_hands_on_every_file() -> None:
+    """A file without a side-car may carry RL.meta.* properties (R7.11.5)."""
     arp = repo_processor()
-    assert [item["uri"] for item in arp.extract_my_interesting_files(LISTING)] == [META_URI]
+    handed_on = [item["uri"] for item in arp.extract_my_interesting_files(LISTING)]
+    assert handed_on == [META_URI, TARGET_URI, "/a/no-hash.bin"]
 
 
 def test_the_listing_keeps_the_hash_of_every_file() -> None:
@@ -79,24 +86,39 @@ def test_a_cli_run_keeps_the_hashes_too() -> None:
 
 
 class FakeSideCar:
-    def __init__(self, path: str | None) -> None:
+    def __init__(self, path: str | None, *, raises: Exception | None = None) -> None:
         self.path = path
+        self.raises = raises
+        self.cleaned = False
 
     def extract_generic_meta_info(self) -> dict[str, Any]:
+        if self.raises is not None:
+            raise self.raises
         meta = {} if self.path is None else {"path": self.path}
         return {"project": "generic-local", "package": "mypkg", "version": "1.0", "meta": meta}
 
+    def remove_my_files(self) -> None:
+        self.cleaned = True
 
-def pre_pass(path: str | None) -> dict[str, Any]:
+
+def pre_pass_app(side_car_for: Any, listing: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
     arp = repo_processor()
     arp.repo = make_repo(name="generic-local", package_type="generic")
-    arp.process = lambda: arp.extract_my_interesting_files(LISTING)
+    arp.process = lambda: arp.extract_my_interesting_files(listing if listing is not None else LISTING)
 
     app: Any = MyApp.__new__(MyApp)
-    app._get_my_afp = lambda **kwargs: FakeSideCar(path)
+    app._get_my_afp = lambda **kwargs: side_car_for(kwargs["artifact_item"]["uri"])
+    app.failed_items = []
+    app.printed = []
+    app.my_print = app.printed.append
 
     repo_db: dict[str, Any] = {}
     app._repo_generic_extract_rl_meta_info(arp, repo_db)
+    return app, repo_db
+
+
+def pre_pass(path: str | None) -> dict[str, Any]:
+    _app, repo_db = pre_pass_app(lambda _uri: FakeSideCar(path))
     return repo_db
 
 
@@ -115,6 +137,71 @@ def test_a_described_file_missing_from_the_listing_has_no_hash() -> None:
 
 def test_a_side_car_without_a_path_stores_nothing() -> None:
     assert pre_pass(None) == {}
+
+
+# ------------------------------- R12.1.1 one unreadable side-car fails only itself
+
+BROKEN_URI = "/a/broken.bin.rl_meta"
+TWO_SIDE_CARS = {"files": [{"uri": BROKEN_URI, "sha2": "b" * 64}, *LISTING["files"]]}
+
+
+def broken_then_good() -> tuple[Any, dict[str, Any], dict[str, FakeSideCar]]:
+    made: dict[str, FakeSideCar] = {}
+
+    def side_car_for(uri: str) -> FakeSideCar:
+        raises = SpectraAssureInvalidAction("missing mandatory items in .rl_meta file") if uri == BROKEN_URI else None
+        made[uri] = FakeSideCar("mypkg-1.0.bin", raises=raises)
+        return made[uri]
+
+    app, repo_db = pre_pass_app(side_car_for, TWO_SIDE_CARS)
+    return app, repo_db, made
+
+
+def test_an_unreadable_side_car_does_not_end_the_pre_pass() -> None:
+    _app, repo_db, _made = broken_then_good()
+    assert repo_db[REPO_DB_DESCRIBED_BY_SIDE_CAR] == {META_URI: TARGET_URI}
+
+
+def test_an_unreadable_side_car_is_recorded_as_failed() -> None:
+    app, repo_db, _made = broken_then_good()
+    assert app.failed_items == [("generic-local", BROKEN_URI)]
+    assert repo_db[REPO_DB_FAILED_SIDE_CARS] == {BROKEN_URI}
+    assert any(BROKEN_URI in line and line.startswith("FAIL") for line in app.printed)
+
+
+def test_the_download_of_every_side_car_is_cleaned_up() -> None:
+    _app, _repo_db, made = broken_then_good()
+    assert all(side_car.cleaned for side_car in made.values())
+
+
+def test_the_main_loop_does_not_try_a_failed_side_car_again() -> None:
+    app: Any = MyApp.__new__(MyApp)
+    app.cli_args = {"portal": True}
+    app.failed_items = [("generic-local", BROKEN_URI)]
+    app.printed = []
+    app.my_print = app.printed.append
+    processed: list[str] = []
+
+    class Untouchable(FakeSideCar):
+        def process(self) -> bool:
+            processed.append("process")
+            return True
+
+        def remove_obsolete_properties(self) -> None:
+            processed.append("cleanup")
+
+    app._get_my_afp = lambda **kwargs: Untouchable(None)
+
+    reason = app._run_one_repo_one_artifact(
+        repo=make_repo(name="generic-local", package_type="generic"),
+        p_type="generic",
+        artifact_item={"uri": BROKEN_URI},
+        repo_db={REPO_DB_FAILED_SIDE_CARS: {BROKEN_URI}},
+    )
+
+    assert reason == PROCESS_FILE_FAILED
+    assert processed == []
+    assert app.failed_items == [("generic-local", BROKEN_URI)]
 
 
 # ------------------------------------------------ and the portal is asked with it

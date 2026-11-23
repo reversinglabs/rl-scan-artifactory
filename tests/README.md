@@ -107,7 +107,7 @@ against.
 | `test_name_mangler_common.py` | the string surgery: strip, split, combine |
 | `test_name_mangler_types.py` | the purl table, one row per package type |
 | `test_simple_data.py` | properties → name/version/arch/release |
-| `test_file_properties.py` | which files are candidates; maven and docker derivation |
+| `test_file_properties.py` | which files are candidates; maven, gradle and docker derivation |
 | `test_generic_meta.py` | the `.rl_meta` side-car |
 | `test_docker_manifest_extract.py` | manifest.json parsing |
 | `test_artifactory_api_pure.py` | sha256 verification, target paths |
